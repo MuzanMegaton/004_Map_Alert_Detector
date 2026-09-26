@@ -176,13 +176,17 @@ function pointsAlong(coords, n) {
   for (let k = 0; k < n; k++) {
     const target = (total * k) / (n - 1);
     while (j < cum.length - 1 && cum[j] < target) j++;
-    out.push({ lat: coords[j][0], lon: coords[j][1], km: cum[j], frac: total ? cum[j] / total : 0 });
+    // Driving direction here, measured over a stretch of road so small bends don't matter.
+    const s = 15, a = coords[Math.max(0, j - s)], b = coords[Math.min(coords.length - 1, j + s)];
+    const heading = bearing({ lat: a[0], lon: a[1] }, { lat: b[0], lon: b[1] });
+    out.push({ lat: coords[j][0], lon: coords[j][1], km: cum[j], frac: total ? cum[j] / total : 0, heading });
   }
   return out;
 }
 
 // ---------- Weather, air, floods ----------
-const HOURLY = "temperature_2m,weather_code,precipitation,precipitation_probability,wind_speed_10m,wind_gusts_10m,visibility";
+const HOURLY = "temperature_2m,weather_code,precipitation,precipitation_probability,wind_speed_10m,wind_gusts_10m,wind_direction_10m,visibility," +
+  "wind_speed_700hPa,wind_direction_700hPa";
 const coordParams = (points) =>
   `latitude=${points.map((p) => p.lat.toFixed(4)).join(",")}&longitude=${points.map((p) => p.lon.toFixed(4)).join(",")}`;
 const asList = (d) => (Array.isArray(d) ? d : [d]);
@@ -190,7 +194,7 @@ const asList = (d) => (Array.isArray(d) ? d : [d]);
 async function weatherFor(points, hours = 48) {
   const data = await getJSON(
     `https://api.open-meteo.com/v1/forecast?${coordParams(points)}` +
-    `&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,precipitation,wind_speed_10m,wind_gusts_10m` +
+    `&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,precipitation,wind_speed_10m,wind_gusts_10m,wind_direction_10m,wind_speed_700hPa,wind_direction_700hPa` +
     `&hourly=${HOURLY}&forecast_hours=${Math.min(hours, 384)}&timeformat=unixtime&timezone=GMT`
   );
   return asList(data);
@@ -274,9 +278,40 @@ function hourAt(w, ms, keys = HOURLY.split(",")) {
   return h;
 }
 
+// How the wind hits a car driving toward `heading` (degrees).
+// → { kind: "headwind" | "tailwind" | "crosswind", side: "left" | "right", cross: sideways share 0..1 }
+function windRelation(fromDeg, heading) {
+  const rel = (((fromDeg - heading) % 360) + 360) % 360; // 0 = wind straight from ahead
+  const cross = Math.abs(Math.sin((rel * Math.PI) / 180));
+  const kind = cross > 0.7 ? "crosswind" : rel < 90 || rel > 270 ? "headwind" : "tailwind";
+  return { kind, side: rel < 180 ? "right" : "left", cross };
+}
+
+// Short wind description: arrow, speed, where it comes from, and (on a route) how it hits the car.
+function windHTML(h, heading) {
+  if (h.wind_direction_10m == null) return `💨 ${Math.round(h.wind_speed_10m)} km/h`;
+  const rel = heading != null ? windRelation(h.wind_direction_10m, heading) : null;
+  return `<span class="wind" title="Wind from ${compass(h.wind_direction_10m)} (${Math.round(h.wind_direction_10m)}°), blowing toward ${compass(h.wind_direction_10m + 180)}">` +
+    `${windArrow(h.wind_direction_10m, 13)} ${Math.round(h.wind_speed_10m)} km/h from ${compass(h.wind_direction_10m)}</span>` +
+    (rel ? ` <span class="sub">(${rel.kind === "crosswind" ? `crosswind from ${rel.side}` : rel.kind})</span>` : "");
+}
+
+// Rain clouds and storms roughly drift with the wind about 3 km up (700 hPa).
+function driftHTML(h) {
+  if (h.wind_direction_700hPa == null || h.wind_speed_700hPa == null) return "";
+  if (h.wind_speed_700hPa < 5) return `Weather drift: <b>almost stationary</b>`;
+  const toward = h.wind_direction_700hPa + 180;
+  return `Weather moving toward <b>${dirArrow(toward, 13)} ${compass(toward)}</b> at ~${Math.round(h.wind_speed_700hPa)} km/h`;
+}
+
 // Hazards at one place/time → [{ t: text, w: risk weight }]
-function hazardsOf(h, flood) {
+function hazardsOf(h, flood, heading) {
   const list = [];
+  if (heading != null && h.wind_direction_10m != null && h.wind_gusts_10m != null) {
+    const rel = windRelation(h.wind_direction_10m, heading);
+    const crossGust = h.wind_gusts_10m * rel.cross;
+    if (crossGust >= 45) list.push({ t: `Strong crosswind from the ${rel.side} (gusts ${Math.round(crossGust)} km/h)`, w: 5 });
+  }
   const [label, , weight] = wmo(h.weather_code);
   if (weight) list.push({ t: label, w: weight });
   if (h.wind_gusts_10m >= 90) list.push({ t: `Storm-force gusts ${Math.round(h.wind_gusts_10m)} km/h`, w: 12 });
@@ -325,8 +360,9 @@ async function pointWeatherHTML(lat, lon) {
     return `
       <div><b>${emoji} ${label}, ${Math.round(c.temperature_2m)}°C</b>
         <span class="muted">(feels ${Math.round(c.apparent_temperature)}°C)</span></div>
-      <div class="muted">Wind ${Math.round(c.wind_speed_10m)} km/h, gusts ${Math.round(c.wind_gusts_10m)} km/h ·
-        Rain ${c.precipitation} mm · Humidity ${c.relative_humidity_2m}%</div>
+      <div>Wind: ${windHTML(c)} <span class="muted">· gusts ${Math.round(c.wind_gusts_10m)} km/h</span></div>
+      ${driftHTML(c) ? `<div>🧭 ${driftHTML(c)}</div>` : ""}
+      <div class="muted">Rain ${c.precipitation} mm · Humidity ${c.relative_humidity_2m}%</div>
       ${aq ? `<div>Air quality: <b style="color:${aqColor}">AQI ${aq.us_aqi} · ${aqLabel}</b>
         <span class="muted">PM2.5 ${aq.pm2_5} µg/m³ · PM10 ${aq.pm10} µg/m³</span></div>` : ""}
       ${riverLine}
@@ -355,7 +391,7 @@ function evaluate(alt, departH) {
     const a = alt.air?.[i] ? hourAt(alt.air[i], eta, ["us_aqi", "pm2_5"]) : null;
     if (a) Object.assign(h, a);
     const flood = floodOn(alt.flood?.[i], eta);
-    return { ...p, name: alt.names[i], eta, h, flood, hazards: hazardsOf(h, flood) };
+    return { ...p, name: alt.names[i], eta, h, flood, hazards: hazardsOf(h, flood, p.heading) };
   });
   const nearKm = Number($("near-route-km").value);
   const alerts = state.alerts
@@ -460,7 +496,8 @@ function drawRoute(fit = false) {
     const [label, emoji] = wmo(c.h.weather_code);
     const icon = L.divIcon({
       className: "",
-      html: `<div class="wx-marker ${c.hazards.length ? "hazard" : ""}">${c.flood?.level ? "🌊" : emoji}</div>`,
+      html: `<div class="wx-marker ${c.hazards.length ? "hazard" : ""}">${c.flood?.level ? "🌊" : emoji}` +
+        (c.h.wind_direction_10m != null ? `<span class="wind-badge" title="Wind from ${compass(c.h.wind_direction_10m)}">${windArrow(c.h.wind_direction_10m, 12)}</span>` : "") + `</div>`,
       iconSize: [32, 32],
     });
     L.marker([c.lat, c.lon], { icon, zIndexOffset: 5000 })
@@ -468,7 +505,9 @@ function drawRoute(fit = false) {
         `<b>${esc(c.name)}</b> · km ${Math.round(c.km)}<br>` +
         `ETA ${new Date(c.eta).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" })}<br>` +
         `${emoji} ${label}, ${Math.round(c.h.temperature_2m)}°C<br>` +
-        `Rain ${c.h.precipitation} mm/h (${c.h.precipitation_probability ?? "–"}%) · Gusts ${Math.round(c.h.wind_gusts_10m)} km/h` +
+        `Rain ${c.h.precipitation} mm/h (${c.h.precipitation_probability ?? "–"}%)<br>` +
+        `Wind ${windHTML(c.h, c.heading)} · gusts ${Math.round(c.h.wind_gusts_10m)} km/h` +
+        (driftHTML(c.h) ? `<br>🧭 ${driftHTML(c.h)}` : "") +
         (c.h.us_aqi != null ? `<br>Air: AQI ${c.h.us_aqi} (${aqiInfo(c.h.us_aqi)[0]}) · PM2.5 ${c.h.pm2_5} µg/m³` : "") +
         (c.flood ? `<br>River: ${Math.round(c.flood.q).toLocaleString()} m³/s` : "") +
         (c.hazards.length ? `<br><b style="color:#d92d20">⚠ ${esc(c.hazards.map((h) => h.t).join(", "))}</b>` : "")
@@ -580,7 +619,7 @@ function renderRouteResult() {
           <span>
             <span class="where">${esc(c.name)}</span> <span class="sub">km ${Math.round(c.km)}</span><br>
             <span class="sub">ETA ${new Date(c.eta).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} ·
-              ${label} · 💧${c.h.precipitation_probability ?? "–"}% · 💨${Math.round(c.h.wind_gusts_10m)} km/h${
+              ${label} · 💧${c.h.precipitation_probability ?? "–"}%<br>${windHTML(c.h, c.heading)}${
               c.h.us_aqi != null ? ` · <span style="color:${aqiInfo(c.h.us_aqi)[1]}">AQI ${c.h.us_aqi}</span>` : ""}${
               c.flood ? ` · 🌊 ${Math.round(c.flood.q).toLocaleString()} m³/s` : ""}</span>
             ${c.hazards.length ? `<br><span class="error">⚠ ${esc(c.hazards.map((h) => h.t).join(", "))}</span>` : ""}

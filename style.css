@@ -342,3 +342,39 @@ select, input {
 .suggest .ico { font-size: 16px; text-align: center; }
 .suggest li.none { display: flex; color: var(--muted); cursor: default; }
 .suggest li.none:hover { background: none; }
+
+/* ---------- Weather direction ---------- */
+.dir-arrow { display: inline-block; vertical-align: -2px; transition: transform .3s; }
+.wind { white-space: nowrap; }
+.wx-marker { position: relative; }
+.wind-badge {
+  position: absolute; right: -8px; bottom: -8px; width: 20px; height: 20px; border-radius: 50%;
+  display: grid; place-items: center; background: var(--panel); color: var(--accent);
+  border: 1px solid var(--border); box-shadow: 0 1px 3px rgba(0,0,0,.3);
+}
+.wind-pin { display: grid; place-items: center; width: 44px; height: 44px; position: relative; filter: drop-shadow(0 1px 2px rgba(0,0,0,.45)); }
+.wind-pin span {
+  position: absolute; bottom: -4px; font-size: 10px; font-weight: 700; color: var(--text);
+  background: var(--panel); border-radius: 6px; padding: 0 4px; opacity: .9;
+}
+.radar-player {
+  position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 550;
+  display: flex; align-items: center; gap: 10px; padding: 6px 12px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 999px; box-shadow: var(--shadow);
+  font-size: 12px; white-space: nowrap;
+}
+.radar-player button { width: 30px; height: 30px; padding: 0; border-radius: 50%; }
+.radar-player input { width: 140px; padding: 0; accent-color: var(--accent); background: none; border: none; }
+#radar-time { min-width: 110px; color: var(--muted); }
+.wind-legend {
+  position: absolute; left: 12px; bottom: 64px; z-index: 500; display: flex; gap: 8px; align-items: center;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 6px 10px;
+  font-size: 11px; box-shadow: var(--shadow);
+}
+.wind-legend span { display: flex; align-items: center; gap: 2px; }
+@media (max-width: 800px) {
+  .radar-player { top: 8px; gap: 6px; padding: 4px 10px; }
+  .radar-player input { width: 90px; }
+  #radar-time { min-width: 0; }
+  .wind-legend { left: 6px; bottom: 56px; flex-wrap: wrap; max-width: 230px; }
+}

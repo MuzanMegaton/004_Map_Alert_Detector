@@ -50,24 +50,24 @@ const baseLayers = {
 };
 baseLayers.Streets.addTo(map);
 
-// Live rain radar (RainViewer, free, no key). The URL is filled in by loadRadar().
-const radarLayer = L.tileLayer("", {
-  opacity: 0.6,
-  maxNativeZoom: 7,
-  maxZoom: 19,
-  zIndex: 400,
-  attribution: 'Radar &copy; <a href="https://www.rainviewer.com">RainViewer</a>',
-});
-L.control.layers(baseLayers, { "🌧 Rain radar (live)": radarLayer }, { position: "topright" }).addTo(map);
+// Overlays (animated rain radar, wind arrows) are added by wind.js.
+const layerControl = L.control.layers(baseLayers, {}, { position: "topright" }).addTo(map);
 
-async function loadRadar() {
-  try {
-    const d = await getJSON("https://api.rainviewer.com/public/weather-maps.json");
-    const latest = d.radar.past[d.radar.past.length - 1];
-    radarLayer.setUrl(`${d.host}${latest.path}/256/{z}/{x}/{y}/2/1_1.png`);
-  } catch (e) {
-    console.warn("Radar unavailable:", e.message);
-  }
+// ---------- Wind direction helpers (shared with route.js and wind.js) ----------
+// Weather data gives the direction wind comes FROM, in degrees (0 = north, 90 = east).
+const COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
+const compass = (deg) => COMPASS[Math.round((((deg % 360) + 360) % 360) / 22.5) % 16];
+// Arrow pointing the way the wind (or weather) is heading.
+const dirArrow = (towardDeg, size = 14, color = "currentColor") =>
+  `<svg class="dir-arrow" width="${size}" height="${size}" viewBox="0 0 24 24" style="transform:rotate(${towardDeg}deg)" aria-hidden="true">` +
+  `<path d="M12 2 L19 21 L12 16.5 L5 21 Z" fill="${color}"/></svg>`;
+const windArrow = (fromDeg, size, color) => dirArrow(fromDeg + 180, size, color);
+// Compass bearing (degrees) from point a to point b.
+function bearing(a, b) {
+  const r = Math.PI / 180;
+  const y = Math.sin((b.lon - a.lon) * r) * Math.cos(b.lat * r);
+  const x = Math.cos(a.lat * r) * Math.sin(b.lat * r) - Math.sin(a.lat * r) * Math.cos(b.lat * r) * Math.cos((b.lon - a.lon) * r);
+  return ((Math.atan2(y, x) / r) + 360) % 360;
 }
 
 const REGIONS = {
@@ -486,7 +486,5 @@ $("jump-to").addEventListener("change", (e) => {
 });
 
 loadAll();
-loadRadar();
 setInterval(loadAll, REFRESH_MS);
-setInterval(loadRadar, 10 * 60 * 1000);
 setInterval(render, 60 * 1000); // keep "x min ago" fresh

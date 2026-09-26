@@ -34,6 +34,7 @@ They're fine for personal use and sharing with friends. For heavy public traffic
 - **Best time to leave** compares leaving now, and in 1, 2, 3, 6, 12 and 24 hours. The best option is marked.
 - At each checkpoint along the route, forecast for **the time you would arrive there**:
   - weather: thunderstorms, heavy rain or snow, fog, strong gusts, low visibility, extreme heat or cold
+  - wind: arrow, speed and direction, whether it's a headwind, tailwind or crosswind for your car, and which way the weather is moving. Strong crosswinds are flagged.
   - air quality: US AQI and PM2.5
   - river flow: flagged when it's in the top 5% of the past year, or above last year's peak
 - Alerts within 50–500 km of the route, plus an overall verdict and tips, such as "Leaving at 6 PM lowers the risk".
@@ -49,7 +50,10 @@ They're fine for personal use and sharing with friends. For heavy public traffic
 
 **Map**
 - Click anywhere for the weather, air quality and river flow there.
-- A live **rain radar** layer, plus street, satellite and dark map styles (layers button, top right).
+- **Weather direction** (layers button, top right):
+  - **🌧 Rain radar (moving, last 2 h)**: plays the last 2 hours of radar in a loop, so you can see which way rain is moving. It has a play/pause button and a time slider.
+  - **💨 Wind direction**: arrows show where the wind blows. Arrow color and length show the speed. Hover an arrow for details and the direction weather is drifting.
+- Street, satellite and dark map styles.
 - **Jump to** a region, such as Thailand.
 - Works on phones: on small screens the map sits on top and alert details slide up from the bottom. It follows the light or dark theme of your device.
 
@@ -61,6 +65,7 @@ Each route and departure time gets a score. The score adds up the hazards at eve
 |---|---|
 | Thunderstorm (with hail) | 10 (12) |
 | Heavy rain or showers, strong gusts ≥ 60 km/h | 6 |
+| Strong crosswind (sideways gusts ≥ 45 km/h) | 5 |
 | Heavy snow or freezing rain | 8–10 |
 | Fog or low visibility | 4 |
 | Unhealthy air (AQI > 150 / > 200) | 4 / 8 |
@@ -94,4 +99,5 @@ The app links each alert to Google Maps.
 - `style.css`: styles, with light and dark themes and the phone layout
 - `app.js`: alert sources, map, alert list, detail panel, tabs and notifications
 - `route.js`: routes, weather, air quality, floods, risk scoring and recommendations
+- `wind.js`: moving rain radar and wind-direction arrows
 - `serve.ps1`: tiny local web server

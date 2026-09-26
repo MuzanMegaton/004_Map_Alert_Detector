@@ -129,6 +129,12 @@
         <span><i class="dot sev-0"></i>Green</span>
         <span><i class="dot sev-info"></i>Info</span>
       </div>
+      <div class="radar-player hidden" id="radar-player">
+        <button type="button" id="radar-play" aria-label="Play or pause radar">▶</button>
+        <input type="range" id="radar-slider" min="0" max="0" value="0" aria-label="Radar time" />
+        <span id="radar-time">Loading…</span>
+      </div>
+      <div class="wind-legend hidden" id="wind-legend"></div>
       <div class="map-hint" id="map-hint">Tip: click anywhere on the map for weather, air quality &amp; river levels</div>
       <article class="detail hidden" id="detail"></article>
     </div>
@@ -139,5 +145,6 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="app.js"></script>
   <script src="route.js"></script>
+  <script src="wind.js"></script>
 </body>
 </html>
