@@ -31,15 +31,111 @@ const routeLayer = L.layerGroup().addTo(map);
 state.route = null; // { from, to, alts:[...], sel, depart }
 
 // ---------- Geo helpers ----------
+// Places picked from the suggestion list (or "My location"), by the text shown in the box.
+const picked = new Map();
+
 async function geocode(q) {
-  const m = q.trim().match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
-  if (m) return { lat: +m[1], lon: +m[2], name: q.trim() };
+  q = q.trim();
+  if (picked.has(q)) return picked.get(q);
+  const m = q.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
+  if (m) return { lat: +m[1], lon: +m[2], name: q };
+  const [best] = await searchPlaces(q, 1);
+  if (best) return best;
   const res = await getJSON(
     `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`
   );
   if (!res.length) throw new Error(`Place not found: "${q}"`);
   return { lat: +res[0].lat, lon: +res[0].lon, name: res[0].display_name.split(",").slice(0, 2).join(",") };
 }
+
+// Place search by name (Photon, OpenStreetMap data, allows search-as-you-type).
+// Results are biased toward the area currently shown on the map.
+const PLACE_ICONS = { city: "🏙", town: "🏘", village: "🏡", state: "🗺", country: "🌏", district: "📍", locality: "📍", street: "🛣", house: "🏢" };
+async function searchPlaces(q, limit = 6) {
+  const c = map.getCenter();
+  try {
+    const r = await getJSON(
+      `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=${limit}&lang=en` +
+      `&lat=${c.lat.toFixed(3)}&lon=${c.lng.toFixed(3)}`
+    );
+    const seen = new Set();
+    return r.features
+      .map((f) => {
+        const p = f.properties;
+        const where = [p.city !== p.name && p.city, p.state !== p.name && p.state, p.country !== p.name && p.country]
+          .filter(Boolean).join(", ");
+        return {
+          lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0],
+          name: p.name || p.street || q,
+          label: where ? `${p.name || p.street}, ${where}` : p.name || q,
+          where, icon: PLACE_ICONS[p.type] || "📍",
+        };
+      })
+      .filter((x) => !seen.has(x.label) && seen.add(x.label));
+  } catch {
+    return [];
+  }
+}
+
+function setupSuggest(input) {
+  const box = document.createElement("ul");
+  box.className = "suggest hidden";
+  box.setAttribute("role", "listbox");
+  input.parentElement.appendChild(box);
+  let items = [], active = -1, timer, seq = 0;
+
+  const close = () => { box.classList.add("hidden"); active = -1; };
+  const choose = (i) => {
+    const it = items[i];
+    if (!it) return;
+    input.value = it.label;
+    picked.set(it.label, it);
+    close();
+    // Jump to the next empty box, or run the check when both are filled.
+    if (input.id === "route-from" && !$("route-to").value) $("route-to").focus();
+    else if ($("route-from").value && $("route-to").value) runRoute();
+  };
+  const paint = () => {
+    box.innerHTML = items.length
+      ? items.map((it, i) => `
+        <li role="option" data-i="${i}" class="${i === active ? "active" : ""}">
+          <span class="ico">${it.icon}</span>
+          <span><b>${esc(it.name)}</b>${it.where ? `<br><small>${esc(it.where)}</small>` : ""}</span>
+        </li>`).join("")
+      : `<li class="none">No places found</li>`;
+    box.classList.remove("hidden");
+  };
+
+  input.addEventListener("input", () => {
+    clearTimeout(timer);
+    const q = input.value.trim();
+    if (q.length < 2) return close();
+    timer = setTimeout(async () => {
+      const my = ++seq;
+      box.innerHTML = `<li class="none"><i class="spinner"></i>Searching…</li>`;
+      box.classList.remove("hidden");
+      const res = await searchPlaces(q);
+      if (my !== seq) return; // a newer search has started
+      items = res;
+      active = -1;
+      paint();
+    }, 250);
+  });
+  input.addEventListener("keydown", (e) => {
+    if (box.classList.contains("hidden") || !items.length) return;
+    if (e.key === "ArrowDown") { active = (active + 1) % items.length; paint(); e.preventDefault(); }
+    else if (e.key === "ArrowUp") { active = (active - 1 + items.length) % items.length; paint(); e.preventDefault(); }
+    else if (e.key === "Enter" && active >= 0) { choose(active); e.preventDefault(); }
+    else if (e.key === "Escape") close();
+  });
+  box.addEventListener("mousedown", (e) => {
+    const li = e.target.closest("li[data-i]");
+    if (li) { e.preventDefault(); choose(+li.dataset.i); }
+  });
+  input.addEventListener("blur", () => setTimeout(close, 150));
+}
+setupSuggest($("route-from"));
+setupSuggest($("route-to"));
 
 async function reverseName(lat, lon) {
   try {
@@ -517,7 +613,12 @@ function clearRoute() {
 
 // The current route lives in the page URL, so it can be shared, bookmarked or reloaded.
 function saveToURL() {
-  const p = new URLSearchParams({ from: $("route-from").value, to: $("route-to").value, dep: $("route-depart").value });
+  // "My location" only means something on this device, so share its coordinates instead.
+  const val = (id) => {
+    const v = $(id).value.trim(), p = picked.get(v);
+    return p && v.startsWith("📍") ? `${p.lat.toFixed(5)},${p.lon.toFixed(5)}` : v;
+  };
+  const p = new URLSearchParams({ from: val("route-from"), to: val("route-to"), dep: $("route-depart").value });
   history.replaceState(null, "", `?${p}`);
 }
 
@@ -597,7 +698,12 @@ $("route-result").addEventListener("click", (e) => {
 
 $("btn-from-me").addEventListener("click", () => {
   navigator.geolocation?.getCurrentPosition(
-    (p) => ($("route-from").value = `${p.coords.latitude.toFixed(5)},${p.coords.longitude.toFixed(5)}`),
+    (p) => {
+      const label = "📍 My location";
+      picked.set(label, { lat: p.coords.latitude, lon: p.coords.longitude, name: "My location" });
+      $("route-from").value = label;
+      $("route-to").focus();
+    },
     (err) => alert(`Location unavailable: ${err.message}`)
   );
 });

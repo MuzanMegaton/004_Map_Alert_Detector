@@ -29,7 +29,7 @@ They're fine for personal use and sharing with friends. For heavy public traffic
 ## Features
 
 **Route check** (the Route check tab)
-- Enter a start and destination (a place name or `lat,lon`), or tap an example route.
+- Search places by name as you type, in English or Thai: cities, districts, landmarks, malls, hotels. Use the arrow keys or click to pick one. You can also use **My location**, type `lat,lon`, or tap an example route.
 - Up to 3 alternative routes are compared. The **safest** one is selected automatically, and the fastest is labeled.
 - **Best time to leave** compares leaving now, and in 1, 2, 3, 6, 12 and 24 hours. The best option is marked.
 - At each checkpoint along the route, forecast for **the time you would arrive there**:
@@ -82,7 +82,7 @@ This is a guide, not an official warning. Always check local authorities in seve
 | River flood forecast | Open-Meteo Flood API (GloFAS) |
 | Live rain radar | RainViewer |
 | Routing | OSRM (OpenStreetMap) |
-| Place search / names | OpenStreetMap Nominatim, BigDataCloud |
+| Place search / names | Photon (search-as-you-type), OpenStreetMap Nominatim, BigDataCloud |
 | Map tiles | OpenStreetMap, Esri satellite, CARTO dark |
 
 Google Maps has no public alerts API, and its crisis alerts come from agencies like these.
