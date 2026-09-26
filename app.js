@@ -1,0 +1,492 @@
+/* Map Alert Detector
+ * Live alerts from free, key-less official sources:
+ *   USGS  – earthquakes worldwide           https://earthquake.usgs.gov
+ *   GDACS – UN/EU global disaster alerts    https://www.gdacs.org
+ *   EONET – NASA natural events (fires, storms, volcanoes, ice…) https://eonet.gsfc.nasa.gov
+ */
+
+const REFRESH_MS = 5 * 60 * 1000;
+const SEVERITY_NAMES = { 3: "Red", 2: "Orange", 1: "Yellow", 0: "Green", "-1": "Info" };
+const SEVERITY_VARS = { 3: "--sev-3", 2: "--sev-2", 1: "--sev-1", 0: "--sev-0", "-1": "--sev-info" };
+
+const CATEGORY_ICONS = {
+  earthquake: "〰", EQ: "〰",
+  TC: "🌀", severeStorms: "🌀",
+  FL: "🌊", floods: "🌊",
+  VO: "🌋", volcanoes: "🌋",
+  DR: "☀", drought: "☀",
+  WF: "🔥", wildfires: "🔥",
+  seaLakeIce: "🧊", snow: "❄", landslides: "⛰", dustHaze: "🌫",
+  tempExtremes: "🌡", manmade: "🏭", waterColor: "💧",
+};
+const GDACS_TYPES = { EQ: "Earthquake", TC: "Tropical cyclone", FL: "Flood", VO: "Volcano", DR: "Drought", WF: "Wildfire" };
+
+const state = {
+  alerts: [],
+  seenIds: new Set(),
+  firstLoad: true,
+  selectedId: null,
+  userPos: null,
+  notify: false,
+  markers: new Map(),
+};
+
+// ---------- Map ----------
+const map = L.map("map", { worldCopyJump: true, zoomControl: true }).setView([15, 100], 3);
+
+const baseLayers = {
+  Streets: L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors",
+  }),
+  Satellite: L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    { maxZoom: 19, attribution: "Imagery &copy; Esri" }
+  ),
+  Dark: L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap &copy; CARTO",
+  }),
+};
+baseLayers.Streets.addTo(map);
+
+// Live rain radar (RainViewer, free, no key). The URL is filled in by loadRadar().
+const radarLayer = L.tileLayer("", {
+  opacity: 0.6,
+  maxNativeZoom: 7,
+  maxZoom: 19,
+  zIndex: 400,
+  attribution: 'Radar &copy; <a href="https://www.rainviewer.com">RainViewer</a>',
+});
+L.control.layers(baseLayers, { "🌧 Rain radar (live)": radarLayer }, { position: "topright" }).addTo(map);
+
+async function loadRadar() {
+  try {
+    const d = await getJSON("https://api.rainviewer.com/public/weather-maps.json");
+    const latest = d.radar.past[d.radar.past.length - 1];
+    radarLayer.setUrl(`${d.host}${latest.path}/256/{z}/{x}/{y}/2/1_1.png`);
+  } catch (e) {
+    console.warn("Radar unavailable:", e.message);
+  }
+}
+
+const REGIONS = {
+  world: [[-60, -170], [75, 190]],
+  thailand: [[5.5, 97.3], [20.5, 105.7]],
+  seasia: [[-11, 92], [28, 141]],
+  japan: [[24, 122], [46, 146]],
+  europe: [[34, -12], [71, 42]],
+  namerica: [[14, -168], [72, -52]],
+};
+
+const markerLayer = L.layerGroup().addTo(map);
+const userLayer = L.layerGroup().addTo(map);
+
+// ---------- Helpers ----------
+const $ = (id) => document.getElementById(id);
+const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const sevColor = (s) => cssVar(SEVERITY_VARS[s]);
+const esc = (s) =>
+  String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function timeAgo(ms) {
+  const sec = Math.round((Date.now() - ms) / 1000);
+  if (sec < 60) return "just now";
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min} min ago`;
+  const h = Math.round(min / 60);
+  if (h < 48) return `${h} h ago`;
+  return `${Math.round(h / 24)} days ago`;
+}
+
+function distanceKm(a, b) {
+  const R = 6371, rad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * rad, dLon = (b.lon - a.lon) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+// Representative point for any GeoJSON geometry (average of all coordinates).
+function geomCenter(geom) {
+  if (!geom) return null;
+  if (geom.type === "Point") return { lon: geom.coordinates[0], lat: geom.coordinates[1] };
+  const pts = [];
+  (function walk(c) {
+    if (typeof c[0] === "number") pts.push(c);
+    else c.forEach(walk);
+  })(geom.coordinates);
+  if (!pts.length) return null;
+  return {
+    lon: pts.reduce((s, p) => s + p[0], 0) / pts.length,
+    lat: pts.reduce((s, p) => s + p[1], 0) / pts.length,
+  };
+}
+
+async function getJSON(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+// ---------- Sources → unified alert model ----------
+// { id, source, category, title, severity(-1..3), time(ms), lat, lon, place, details:[[k,v]], description, url }
+
+async function fetchUSGS() {
+  const feed = $("quake-feed").value;
+  const data = await getJSON(`https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/${feed}.geojson`);
+  const pagerLevel = { green: 0, yellow: 1, orange: 2, red: 3 };
+  return data.features.map((f) => {
+    const p = f.properties;
+    const [lon, lat, depth] = f.geometry.coordinates;
+    const mag = p.mag ?? 0;
+    const magSev = mag >= 7 ? 3 : mag >= 6 ? 2 : mag >= 4.5 ? 1 : 0;
+    const severity = Math.max(magSev, pagerLevel[p.alert] ?? -1);
+    return {
+      id: `usgs-${f.id}`,
+      source: "USGS",
+      category: "earthquake",
+      title: p.title || `M${mag} earthquake`,
+      severity,
+      time: p.time,
+      lat, lon,
+      place: p.place,
+      details: [
+        ["Magnitude", `${mag.toFixed(1)} ${p.magType || ""}`],
+        ["Depth", `${depth?.toFixed(1)} km`],
+        ["PAGER alert", p.alert ? p.alert.toUpperCase() : "None"],
+        ["Tsunami", p.tsunami ? "⚠ Tsunami information issued" : "No"],
+        ["Felt reports", p.felt ?? 0],
+        ["Significance", p.sig],
+        ["Status", p.status],
+      ],
+      description: "",
+      url: p.url,
+    };
+  });
+}
+
+async function fetchGDACS() {
+  const to = new Date();
+  const from = new Date(Date.now() - 30 * 864e5);
+  const d = (x) => x.toISOString().slice(0, 10);
+  const url =
+    "https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH" +
+    `?eventlist=EQ;TC;FL;VO;DR;WF&alertlevel=green;orange;red&fromdate=${d(from)}&todate=${d(to)}`;
+  const data = await getJSON(url);
+  const level = { Green: 0, Orange: 2, Red: 3 };
+  const byId = new Map();
+  for (const f of data.features || []) {
+    const p = f.properties;
+    // USGS already covers earthquakes in more detail; keep only GDACS quakes that are Orange/Red.
+    if (p.eventtype === "EQ" && p.alertlevel === "Green") continue;
+    const c = geomCenter(f.geometry);
+    if (!c) continue;
+    const id = `gdacs-${p.eventtype}-${p.eventid}`;
+    const prev = byId.get(id);
+    if (prev && prev._episode >= p.episodeid) continue;
+    byId.set(id, {
+      id,
+      _episode: p.episodeid,
+      source: "GDACS",
+      category: p.eventtype,
+      title: p.name || `${GDACS_TYPES[p.eventtype]} – ${p.country}`,
+      severity: level[p.alertlevel] ?? 0,
+      time: Date.parse(p.datemodified || p.todate || p.fromdate),
+      lat: c.lat, lon: c.lon,
+      place: p.country,
+      details: [
+        ["Type", GDACS_TYPES[p.eventtype] || p.eventtype],
+        ["Alert level", p.alertlevel],
+        ["Country", p.country || "—"],
+        ["Severity", p.severitydata?.severitytext || "—"],
+        ["From", new Date(p.fromdate).toLocaleString()],
+        ["To", new Date(p.todate).toLocaleString()],
+        ["Ongoing", p.iscurrent === "true" ? "Yes" : "No"],
+        ["Data source", p.source || "—"],
+      ],
+      description: p.htmldescription || p.description || "",
+      url: p.url?.report,
+    });
+  }
+  return [...byId.values()];
+}
+
+async function fetchEONET() {
+  const data = await getJSON("https://eonet.gsfc.nasa.gov/api/v3/events/geojson?status=open&days=30");
+  // The GeoJSON feed has one feature per observation; keep the latest per event.
+  const byId = new Map();
+  for (const f of data.features || []) {
+    const p = f.properties;
+    const t = Date.parse(p.date);
+    const prev = byId.get(p.id);
+    if (prev && prev.time >= t) continue;
+    const c = geomCenter(f.geometry);
+    if (!c) continue;
+    const cat = p.categories?.[0] || {};
+    const sev = cat.id === "severeStorms" || cat.id === "volcanoes" ? 1 : -1;
+    byId.set(p.id, {
+      id: `eonet-${p.id}`,
+      source: "EONET",
+      category: cat.id,
+      title: p.title,
+      severity: sev,
+      time: t,
+      lat: c.lat, lon: c.lon,
+      place: "",
+      details: [
+        ["Category", cat.title || "—"],
+        ["Observed", new Date(t).toLocaleString()],
+        ...(p.magnitudeValue != null ? [["Magnitude", `${p.magnitudeValue} ${p.magnitudeUnit || ""}`]] : []),
+        ["Sources", (p.sources || []).map((s) => s.id).join(", ") || "—"],
+      ],
+      description: p.description || "",
+      url: p.sources?.[0]?.url || p.link,
+    });
+  }
+  return [...byId.values()];
+}
+
+const SOURCES = { USGS: fetchUSGS, GDACS: fetchGDACS, EONET: fetchEONET };
+
+// ---------- Loading ----------
+async function loadAll() {
+  $("status-text").textContent = "Updating…";
+  const names = Object.keys(SOURCES);
+  const results = await Promise.allSettled(names.map((n) => SOURCES[n]()));
+  const alerts = [];
+  const errors = [];
+  results.forEach((r, i) => {
+    if (r.status === "fulfilled") alerts.push(...r.value);
+    else errors.push(`${names[i]}: ${r.reason.message}`);
+  });
+
+  const fresh = alerts.filter((a) => !state.seenIds.has(a.id));
+  alerts.forEach((a) => state.seenIds.add(a.id));
+  if (!state.firstLoad) announce(fresh.filter((a) => a.severity >= 2));
+  state.firstLoad = false;
+
+  state.alerts = alerts;
+  const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  $("status-text").textContent =
+    `Live · ${alerts.length} alerts · updated ${now}` + (errors.length ? ` · ⚠ ${errors.length} source(s) unavailable` : "");
+  $("status-text").title = errors.join(" | ");
+  render();
+  if (state.route) renderRouteResult();
+}
+
+// ---------- Filtering & rendering ----------
+function filtered() {
+  const sources = new Set([...document.querySelectorAll("#source-chips input:checked")].map((i) => i.value));
+  const minSev = Number($("min-severity").value);
+  const q = $("search").value.trim().toLowerCase();
+  let list = state.alerts.filter(
+    (a) =>
+      sources.has(a.source) &&
+      (minSev === 0 || a.severity >= minSev) &&
+      (!q || `${a.title} ${a.place} ${a.category}`.toLowerCase().includes(q))
+  );
+  if (state.userPos) list.forEach((a) => (a.distance = distanceKm(state.userPos, a)));
+  if (state.route) {
+    list.forEach((a) => (a.routeDist = routeDistanceKm(a)));
+    if ($("near-route").checked) list = list.filter((a) => a.routeDist <= Number($("near-route-km").value));
+  }
+  const sort = $("sort").value;
+  list.sort((a, b) =>
+    sort === "severity" ? b.severity - a.severity || b.time - a.time
+    : sort === "distance" && state.userPos ? a.distance - b.distance
+    : b.time - a.time
+  );
+  return list;
+}
+
+function iconFor(a) {
+  return CATEGORY_ICONS[a.category] || "!";
+}
+
+function markerFor(a) {
+  const size = a.severity >= 3 ? 30 : a.severity === 2 ? 26 : 20;
+  const cls = a.severity === -1 ? "sev-info" : `sev-${a.severity}`;
+  const icon = L.divIcon({
+    className: "",
+    html: `<div class="marker ${cls}">${a.severity >= 1 || a.source !== "USGS" ? iconFor(a) : ""}</div>`,
+    iconSize: [size, size],
+  });
+  const m = L.marker([a.lat, a.lon], { icon, zIndexOffset: a.severity * 1000, title: a.title });
+  m.on("click", () => select(a.id, false));
+  return m;
+}
+
+function render() {
+  const list = filtered();
+  markerLayer.clearLayers();
+  state.markers.clear();
+  list.forEach((a) => {
+    const m = markerFor(a);
+    m.addTo(markerLayer);
+    state.markers.set(a.id, m);
+  });
+
+  const counts = [3, 2, 1, 0, -1]
+    .map((s) => [s, list.filter((a) => a.severity === s).length])
+    .filter(([, n]) => n)
+    .map(([s, n]) => `${SEVERITY_NAMES[s]}: ${n}`);
+  $("counts").textContent = [`Showing ${list.length}`, ...counts].join(" · ");
+  $("tab-count").textContent = list.length;
+
+  const ul = $("alert-list");
+  if (!list.length) {
+    ul.innerHTML = `<li class="empty">No alerts match your filters.</li>`;
+    return;
+  }
+  ul.innerHTML = list
+    .slice(0, 500)
+    .map(
+      (a) => `
+      <li data-id="${esc(a.id)}" class="${a.id === state.selectedId ? "selected" : ""}">
+        <div class="icon" style="background:${sevColor(a.severity)}">${iconFor(a)}</div>
+        <div>
+          <div class="title">${esc(a.title)}</div>
+          <div class="meta">${esc(a.source)} · ${timeAgo(a.time)}${
+            a.distance != null ? ` · ${Math.round(a.distance).toLocaleString()} km away` : ""
+          }${a.routeDist != null && state.route ? ` · ${Math.round(a.routeDist)} km from route` : ""
+          }${a.place && !a.title.includes(a.place) ? ` · ${esc(a.place)}` : ""}</div>
+        </div>
+      </li>`
+    )
+    .join("");
+}
+
+function select(id, fly = true) {
+  const a = state.alerts.find((x) => x.id === id);
+  if (!a) return;
+  state.selectedId = id;
+  document.querySelectorAll(".alert-list li").forEach((li) => li.classList.toggle("selected", li.dataset.id === id));
+  document.querySelector(`.alert-list li[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "nearest" });
+  // On phones the details sheet covers the lower part of the map, so keep the marker in the top part.
+  const z = fly ? Math.max(map.getZoom(), 6) : map.getZoom();
+  let target = L.latLng(a.lat, a.lon);
+  if (innerWidth <= 800) target = map.unproject(map.project(target, z).add([0, map.getSize().y * 0.28]), z);
+  if (fly || innerWidth <= 800) map.flyTo(target, z, { duration: 0.8 });
+  showDetail(a);
+}
+
+function showDetail(a) {
+  const gmaps = `https://www.google.com/maps/search/?api=1&query=${a.lat.toFixed(5)},${a.lon.toFixed(5)}`;
+  const desc = a.description ? `<p>${esc(a.description.replace(/<[^>]*>/g, ""))}</p>` : "";
+  const el = $("detail");
+  el.innerHTML = `
+    <button class="close" aria-label="Close">✕</button>
+    <span class="badge" style="background:${sevColor(a.severity)}">${SEVERITY_NAMES[a.severity]}</span>
+    <span class="badge src">${esc(a.source)}</span>
+    <h2>${iconFor(a)} ${esc(a.title)}</h2>
+    <dl>
+      <dt>Time</dt><dd>${new Date(a.time).toLocaleString()} (${timeAgo(a.time)})</dd>
+      <dt>Location</dt><dd>${a.lat.toFixed(3)}, ${a.lon.toFixed(3)}</dd>
+      ${a.distance != null ? `<dt>Distance</dt><dd>${Math.round(a.distance).toLocaleString()} km from you</dd>` : ""}
+      ${a.details.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}
+    </dl>
+    <div class="wx-box" id="detail-wx"><span class="muted">Loading current weather…</span></div>
+    ${desc}
+    <div class="actions">
+      <a class="primary" href="${gmaps}" target="_blank" rel="noopener">Open in Google Maps</a>
+      ${a.url ? `<a href="${esc(a.url)}" target="_blank" rel="noopener">Official report ↗</a>` : ""}
+    </div>`;
+  el.classList.remove("hidden");
+  pointWeatherHTML(a.lat, a.lon).then((html) => {
+    const box = $("detail-wx");
+    if (box && state.selectedId === a.id) box.innerHTML = `<div class="muted" style="font-size:12px">Weather there now</div>${html}`;
+  });
+  el.querySelector(".close").onclick = () => {
+    el.classList.add("hidden");
+    state.selectedId = null;
+    document.querySelectorAll(".alert-list li.selected").forEach((li) => li.classList.remove("selected"));
+  };
+}
+
+// ---------- New-alert notifications ----------
+function announce(newAlerts) {
+  newAlerts.slice(0, 5).forEach((a) => {
+    const t = document.createElement("div");
+    t.className = "toast";
+    t.style.borderLeftColor = sevColor(a.severity);
+    t.innerHTML = `<strong>New ${SEVERITY_NAMES[a.severity]} alert</strong><br>${esc(a.title)}`;
+    t.onclick = () => { select(a.id); t.remove(); };
+    $("toasts").appendChild(t);
+    setTimeout(() => t.remove(), 15000);
+    if (state.notify && "Notification" in window && Notification.permission === "granted") {
+      const n = new Notification(`${SEVERITY_NAMES[a.severity]} alert – ${a.source}`, { body: a.title });
+      n.onclick = () => { window.focus(); select(a.id); };
+    }
+  });
+}
+
+// ---------- UI wiring ----------
+function showTab(name) {
+  document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  document.querySelectorAll(".tab-panel").forEach((p) => p.classList.toggle("hidden", p.id !== `tab-${name}`));
+}
+document.querySelector(".tabs").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-tab]");
+  if (b) showTab(b.dataset.tab);
+});
+
+// The "click the map" tip disappears after the first click or 12 seconds.
+const hideHint = () => $("map-hint").style.opacity = 0;
+map.once("click", hideHint);
+setTimeout(hideHint, 12000);
+
+$("alert-list").addEventListener("click", (e) => {
+  const li = e.target.closest("li[data-id]");
+  if (li) select(li.dataset.id);
+});
+["search", "min-severity", "sort"].forEach((id) => $(id).addEventListener("input", render));
+$("source-chips").addEventListener("change", render);
+$("quake-feed").addEventListener("change", loadAll);
+$("btn-refresh").addEventListener("click", loadAll);
+
+$("btn-locate").addEventListener("click", () => {
+  if (!navigator.geolocation) return alert("Geolocation is not supported by this browser.");
+  $("status-text").textContent = "Finding your location…";
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      state.userPos = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      userLayer.clearLayers();
+      L.circleMarker([state.userPos.lat, state.userPos.lon], {
+        radius: 8, color: "#fff", weight: 2, fillColor: "#2f6fed", fillOpacity: 1,
+      }).bindTooltip("You are here").addTo(userLayer);
+      L.circle([state.userPos.lat, state.userPos.lon], { radius: 500000, color: "#2f6fed", weight: 1, fillOpacity: 0.05 })
+        .addTo(userLayer);
+      map.flyTo([state.userPos.lat, state.userPos.lon], 5);
+      const sortSel = $("sort");
+      sortSel.querySelector('option[value="distance"]').disabled = false;
+      sortSel.value = "distance";
+      showTab("alerts");
+      $("btn-locate").classList.add("active");
+      render();
+      $("status-text").textContent = `${state.alerts.length} alerts · sorted by distance from you`;
+    },
+    (err) => ($("status-text").textContent = `Location unavailable: ${err.message}`)
+  );
+});
+
+$("btn-notify").addEventListener("click", async () => {
+  if (!("Notification" in window)) return alert("Notifications are not supported by this browser.");
+  if (!state.notify) {
+    const perm = await Notification.requestPermission();
+    state.notify = perm === "granted";
+  } else {
+    state.notify = false;
+  }
+  $("btn-notify").classList.toggle("active", state.notify);
+});
+
+$("jump-to").addEventListener("change", (e) => {
+  const b = REGIONS[e.target.value];
+  if (b) map.fitBounds(b);
+});
+
+loadAll();
+loadRadar();
+setInterval(loadAll, REFRESH_MS);
+setInterval(loadRadar, 10 * 60 * 1000);
+setInterval(render, 60 * 1000); // keep "x min ago" fresh

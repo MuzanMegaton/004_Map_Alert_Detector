@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Live disaster alerts, weather, air quality and flood risk on a map, with a safe-route planner." />
+  <meta name="theme-color" content="#0f1218" />
+  <title>Map Alert Detector</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚠️</text></svg>" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">⚠</span>
+      <div>
+        <h1>Map Alert Detector</h1>
+        <div class="status-pill"><i class="live-dot"></i><span id="status-text">Loading alerts…</span></div>
+      </div>
+    </div>
+    <div class="toolbar">
+      <select id="jump-to" title="Jump to region" aria-label="Jump to region">
+        <option value="">🌏 Jump to…</option>
+        <option value="thailand">Thailand</option>
+        <option value="seasia">Southeast Asia</option>
+        <option value="japan">Japan</option>
+        <option value="europe">Europe</option>
+        <option value="namerica">North America</option>
+        <option value="world">Whole world</option>
+      </select>
+      <button id="btn-refresh" title="Refresh now" aria-label="Refresh">⟳<span class="lbl"> Refresh</span></button>
+      <button id="btn-locate" title="Show alerts near my location" aria-label="Near me">◎<span class="lbl"> Near me</span></button>
+      <button id="btn-notify" title="Get browser notifications for new orange/red alerts" aria-label="Notifications">🔔<span class="lbl"> Notify</span></button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <nav class="tabs" role="tablist">
+        <button role="tab" data-tab="route" class="active">🛣 Route check</button>
+        <button role="tab" data-tab="alerts">⚠ Alerts <span class="count" id="tab-count"></span></button>
+      </nav>
+
+      <section class="tab-panel" id="tab-route">
+        <form id="route-form" class="card">
+          <div class="route-field">
+            <span class="pin start"></span>
+            <input id="route-from" placeholder="From: city, address or lat,lon" required autocomplete="off" />
+            <button type="button" id="btn-from-me" title="Use my location" aria-label="Use my location">◎</button>
+          </div>
+          <div class="route-field">
+            <span class="pin end"></span>
+            <input id="route-to" placeholder="To: city, address or lat,lon" required autocomplete="off" />
+            <button type="button" id="btn-swap" title="Swap start and destination" aria-label="Swap">⇅</button>
+          </div>
+          <div class="route-actions">
+            <select id="route-depart" aria-label="Departure time">
+              <option value="0">Leave now</option>
+              <option value="1">Leave in 1 h</option>
+              <option value="2">Leave in 2 h</option>
+              <option value="3">Leave in 3 h</option>
+              <option value="6">Leave in 6 h</option>
+              <option value="12">Leave in 12 h</option>
+              <option value="24">Leave in 24 h</option>
+            </select>
+            <button type="submit" class="primary-btn">Check route</button>
+            <button type="button" id="btn-route-clear">Clear</button>
+          </div>
+        </form>
+        <div id="route-result"></div>
+      </section>
+
+      <section class="tab-panel hidden" id="tab-alerts">
+        <div class="filters">
+          <input id="search" type="search" placeholder="🔍 Search place, country, event…" />
+          <div class="chips" id="source-chips">
+            <label><input type="checkbox" value="USGS" checked /> Earthquakes <small>USGS</small></label>
+            <label><input type="checkbox" value="GDACS" checked /> Disasters <small>GDACS</small></label>
+            <label><input type="checkbox" value="EONET" checked /> Natural events <small>NASA</small></label>
+          </div>
+          <div class="row">
+            <label>Min severity
+              <select id="min-severity">
+                <option value="0">All</option>
+                <option value="1">Yellow +</option>
+                <option value="2">Orange +</option>
+                <option value="3">Red only</option>
+              </select>
+            </label>
+            <label>Quakes
+              <select id="quake-feed">
+                <option value="2.5_day">M2.5+ past day</option>
+                <option value="2.5_week" selected>M2.5+ past week</option>
+                <option value="4.5_week">M4.5+ past week</option>
+                <option value="significant_month">Significant, month</option>
+              </select>
+            </label>
+            <label>Sort
+              <select id="sort">
+                <option value="time">Newest</option>
+                <option value="severity">Severity</option>
+                <option value="distance" disabled>Distance</option>
+              </select>
+            </label>
+          </div>
+          <label class="near-route hidden" id="near-route-wrap">
+            <input type="checkbox" id="near-route" checked /> Only alerts within
+            <select id="near-route-km">
+              <option value="50">50 km</option>
+              <option value="100" selected>100 km</option>
+              <option value="250">250 km</option>
+              <option value="500">500 km</option>
+            </select>
+            of the route
+          </label>
+          <div class="counts" id="counts"></div>
+        </div>
+        <ul class="alert-list" id="alert-list"><li class="empty"><i class="spinner"></i> Loading alerts…</li></ul>
+      </section>
+    </aside>
+
+    <div class="map-wrap">
+      <div id="map"></div>
+      <div class="legend" title="Alert severity">
+        <span><i class="dot sev-3"></i>Red</span>
+        <span><i class="dot sev-2"></i>Orange</span>
+        <span><i class="dot sev-1"></i>Yellow</span>
+        <span><i class="dot sev-0"></i>Green</span>
+        <span><i class="dot sev-info"></i>Info</span>
+      </div>
+      <div class="map-hint" id="map-hint">Tip: click anywhere on the map for weather, air quality &amp; river levels</div>
+      <article class="detail hidden" id="detail"></article>
+    </div>
+  </main>
+
+  <div id="toasts"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+  <script src="route.js"></script>
+</body>
+</html>
