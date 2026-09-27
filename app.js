@@ -122,18 +122,28 @@ function geomCenter(geom) {
   };
 }
 
-async function getJSON(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-  return res.json();
+// All requests go through net.js (timeouts, retries, typed errors, cache, per-host limits).
+function getJSON(url, opts) {
+  return fetchJSON(url, opts);
 }
+
+// Only http(s) links from feeds are shown as links.
+const safeUrl = (u) => (/^https?:\/\//i.test(u || "") ? u : "");
+
+// GDACS sends UTC date-times without a zone ("2026-09-26T16:54:52"); read them as UTC.
+const utcMs = (s) => (s ? Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s : s + "Z") : NaN);
+// Date and time with the time zone shown, e.g. "27 Sep 2026, 10:23 GMT+7".
+const fmtDateTime = (ms) =>
+  Number.isNaN(ms) ? "—"
+  : new Date(ms).toLocaleString([], { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZoneName: "short" });
 
 // ---------- Sources → unified alert model ----------
 // { id, source, category, title, severity(-1..3), time(ms), lat, lon, place, details:[[k,v]], description, url }
 
 async function fetchUSGS() {
   const feed = $("quake-feed").value;
-  const data = await getJSON(`https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/${feed}.geojson`);
+  const data = await getJSON(`https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/${feed}.geojson`,
+    { timeout: 15000, source: "USGS" });
   const pagerLevel = { green: 0, yellow: 1, orange: 2, red: 3 };
   return data.features.map((f) => {
     const p = f.properties;
@@ -172,7 +182,7 @@ async function fetchGDACS() {
   const url =
     "https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH" +
     `?eventlist=EQ;TC;FL;VO;DR;WF&alertlevel=green;orange;red&fromdate=${d(from)}&todate=${d(to)}`;
-  const data = await getJSON(url);
+  const data = await getJSON(url, { timeout: 15000, source: "GDACS" });
   const level = { Green: 0, Orange: 2, Red: 3 };
   const byId = new Map();
   for (const f of data.features || []) {
@@ -184,6 +194,8 @@ async function fetchGDACS() {
     const id = `gdacs-${p.eventtype}-${p.eventid}`;
     const prev = byId.get(id);
     if (prev && prev._episode >= p.episodeid) continue;
+    let time = utcMs(p.datemodified || p.todate);
+    if (Number.isNaN(time)) time = utcMs(p.fromdate);
     byId.set(id, {
       id,
       _episode: p.episodeid,
@@ -191,7 +203,7 @@ async function fetchGDACS() {
       category: p.eventtype,
       title: p.name || `${GDACS_TYPES[p.eventtype]} – ${p.country}`,
       severity: level[p.alertlevel] ?? 0,
-      time: Date.parse(p.datemodified || p.todate || p.fromdate),
+      time,
       lat: c.lat, lon: c.lon,
       place: p.country,
       details: [
@@ -199,8 +211,8 @@ async function fetchGDACS() {
         ["Alert level", p.alertlevel],
         ["Country", p.country || "—"],
         ["Severity", p.severitydata?.severitytext || "—"],
-        ["From", new Date(p.fromdate).toLocaleString()],
-        ["To", new Date(p.todate).toLocaleString()],
+        ["From", fmtDateTime(utcMs(p.fromdate))],
+        ["To", fmtDateTime(utcMs(p.todate))],
         ["Ongoing", p.iscurrent === "true" ? "Yes" : "No"],
         ["Data source", p.source || "—"],
       ],
@@ -212,7 +224,8 @@ async function fetchGDACS() {
 }
 
 async function fetchEONET() {
-  const data = await getJSON("https://eonet.gsfc.nasa.gov/api/v3/events/geojson?status=open&days=30");
+  const data = await getJSON("https://eonet.gsfc.nasa.gov/api/v3/events/geojson?status=open&days=30",
+    { timeout: 15000, source: "NASA EONET" });
   // The GeoJSON feed has one feature per observation; keep the latest per event.
   const byId = new Map();
   for (const f of data.features || []) {
@@ -257,7 +270,7 @@ async function loadAll() {
   const errors = [];
   results.forEach((r, i) => {
     if (r.status === "fulfilled") alerts.push(...r.value);
-    else errors.push(`${names[i]}: ${r.reason.message}`);
+    else errors.push(`${names[i]}: ${errorText(r.reason, names[i])}`);
   });
 
   const fresh = alerts.filter((a) => !state.seenIds.has(a.id));
@@ -389,7 +402,7 @@ function showDetail(a) {
     ${desc}
     <div class="actions">
       <a class="primary" href="${gmaps}" target="_blank" rel="noopener">Open in Google Maps</a>
-      ${a.url ? `<a href="${esc(a.url)}" target="_blank" rel="noopener">Official report ↗</a>` : ""}
+      ${safeUrl(a.url) ? `<a href="${esc(a.url)}" target="_blank" rel="noopener">Official report ↗</a>` : ""}
     </div>`;
   el.classList.remove("hidden");
   pointWeatherHTML(a.lat, a.lon).then((html) => {
