@@ -381,3 +381,35 @@ select, input {
   #radar-time { min-width: 0; }
   .wind-legend { left: 6px; bottom: 56px; flex-wrap: wrap; max-width: 230px; }
 }
+
+/* ---------- Search upgrade ---------- */
+.map-search {
+  position: absolute; top: 12px; left: 56px; z-index: 700; width: min(300px, calc(100% - 130px));
+  display: block;
+}
+.map-search input {
+  width: 100%; background: var(--panel); border-radius: 999px; padding: 9px 14px;
+  box-shadow: var(--shadow); font-size: 16px;
+}
+.map-search .suggest { left: 0; }
+.map-hint { top: 62px; }
+.radar-player { top: 62px; }
+.suggest { max-height: min(320px, 45vh); }
+.suggest li.head {
+  display: block; padding: 4px 8px 2px; font-size: 11px; font-weight: 700; letter-spacing: .05em;
+  text-transform: uppercase; color: var(--muted); cursor: default;
+}
+.suggest li.head:hover { background: none; }
+.suggest mark { background: none; color: var(--accent); font-weight: 800; }
+.suggest .kind {
+  font-style: normal; font-size: 10px; font-weight: 600; color: var(--muted);
+  border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; margin-left: 4px; white-space: nowrap;
+}
+.suggest li.none { line-height: 1.4; }
+.route-field input[type="search"] { font-size: 16px; }
+.popup-actions { display: flex; gap: 6px; margin-top: 8px; }
+.popup-actions button { flex: 1; font-size: 12px; padding: 6px 8px; background: var(--panel-2); color: var(--text); }
+@media (max-width: 800px) {
+  .map-search { top: 8px; left: 52px; width: calc(100% - 116px); }
+  .map-hint, .radar-player { top: 56px; }
+}

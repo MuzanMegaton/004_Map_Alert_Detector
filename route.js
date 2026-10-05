@@ -30,112 +30,365 @@ const ROUTE_COLORS = ["#2f6fed", "#7a5af8", "#0e9384"];
 const routeLayer = L.layerGroup().addTo(map);
 state.route = null; // { from, to, alts:[...], sel, depart }
 
-// ---------- Geo helpers ----------
-// Places picked from the suggestion list (or "My location"), by the text shown in the box.
+// ---------- Place search ----------
+// Places picked from a suggestion list (or "My location"), by the text shown in the box.
 const picked = new Map();
+
+// Recently used places, newest first, kept on this device.
+const RECENT_KEY = "mad.recent-places";
+function recentPlaces() {
+  try { return JSON.parse(localStorage.getItem(RECENT_KEY)) || []; } catch { return []; }
+}
+function rememberPlace(p) {
+  if (!p?.label || p.label.startsWith("📍")) return;
+  try {
+    const { lat, lon, name, label, where = "", icon = "📍", kind = "" } = p;
+    const list = [{ lat, lon, name, label, where, icon, kind }, ...recentPlaces().filter((r) => r.label !== label)];
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, 8)));
+  } catch { /* storage unavailable */ }
+}
+
+// What kind of place a result is: [icon, label], from the OpenStreetMap tags.
+const PLACE_KINDS = [
+  [/^aeroway:/, "✈️", "Airport"],
+  [/^railway:|:station$|:bus_station$/, "🚉", "Station"],
+  [/:hospital$|:clinic$/, "🏥", "Hospital"],
+  [/:fuel$|:charging_station$/, "⛽", "Fuel"],
+  [/^tourism:(hotel|hostel|guest_house|resort|motel)/, "🏨", "Hotel"],
+  [/^tourism:|^historic:/, "📸", "Attraction"],
+  [/^shop:|:marketplace$/, "🛍", "Shop"],
+  [/:restaurant$|:cafe$|:fast_food$|:food_court$/, "🍜", "Food"],
+  [/:university$|:school$|:college$/, "🎓", "School"],
+  [/:place_of_worship$/, "🛕", "Temple"],
+  [/^natural:|^leisure:(park|nature_reserve)|^boundary:national_park/, "🏞", "Nature"],
+  [/^highway:/, "🛣", "Road"],
+];
+const PLACE_TYPES = {
+  country: ["🌏", "Country"], state: ["🗺", "Province"], county: ["🗺", "District"], city: ["🏙", "City"],
+  town: ["🏘", "Town"], village: ["🏡", "Village"], district: ["📍", "District"], locality: ["📍", "Area"],
+  street: ["🛣", "Road"], house: ["🏢", "Place"],
+};
+function placeKind(key, value, type) {
+  const tag = `${key || ""}:${value || ""}`;
+  const hit = PLACE_KINDS.find(([re]) => re.test(tag));
+  if (hit) return [hit[1], hit[2]];
+  return PLACE_TYPES[type] || PLACE_TYPES[value] || ["📍", "Place"];
+}
+
+const hasThai = (s) => /[฀-๿]/.test(s);
+const norm = (s) => String(s || "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").trim();
+
+// Photon: OpenStreetMap search that allows search-as-you-type.
+// `near` = true asks for places close to the map view; false asks for the best-known places anywhere.
+async function photonSearch(q, limit, signal, near) {
+  const c = map.getCenter();
+  const z = Math.max(6, Math.min(12, Math.round(map.getZoom())));
+  // Thai text gets names in the local language; otherwise English names where they exist.
+  const r = await getJSON(
+    `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=${limit + 4}&lang=${hasThai(q) ? "default" : "en"}` +
+    (near ? `&lat=${c.lat.toFixed(1)}&lon=${c.lng.toFixed(1)}&zoom=${z}&location_bias_scale=0.3` : ""),
+    { timeout: 12000, retries: 0, ttl: 864e5, signal, source: "Place search" }
+  );
+  return (r.features || []).map((f, i) => {
+    const p = f.properties;
+    const name = p.name || [p.housenumber, p.street].filter(Boolean).join(" ") || p.city || q;
+    const where = [...new Set([p.district, p.city, p.county, p.state, p.country].filter((v) => v && v !== name))]
+      .slice(-3).join(", ");
+    const [icon, kind] = placeKind(p.osm_key, p.osm_value, p.type);
+    return {
+      lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0],
+      name, where, icon, kind, label: where ? `${name}, ${where}` : name, cc: p.countrycode || "",
+      // The unbiased list comes back with the best-known places first.
+      rank: near ? 0 : Math.max(0, 2.5 - i * 0.3),
+    };
+  });
+}
+
+// Nominatim: the backup, used only for a full query (never while typing each letter).
+async function nominatimSearch(q, limit, signal) {
+  const r = await getJSON(
+    `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=${limit}&q=${encodeURIComponent(q)}`,
+    { timeout: 8000, retries: 1, ttl: 864e5, signal, source: "Place search" }
+  );
+  return r.map((x) => {
+    const parts = x.display_name.split(",").map((s) => s.trim());
+    const name = x.name || parts[0];
+    const where = parts.filter((s) => s !== name && !/^\d+$/.test(s)).slice(-3).join(", ");
+    const [icon, kind] = placeKind(x.category, x.type, x.addresstype);
+    return {
+      lat: +x.lat, lon: +x.lon, name, where, icon, kind,
+      label: where ? `${name}, ${where}` : name, cc: (x.address?.country_code || "").toUpperCase(),
+    };
+  });
+}
+
+// Best matches first: how well the name fits what was typed, how well known the place is,
+// towns over single buildings, and a small bonus for being close to the map view.
+function rankPlaces(items, q) {
+  const nq = norm(q), c = map.getCenter(), here = { lat: c.lat, lon: c.lng };
+  const typeScore = { City: 3, Town: 2.5, Province: 2.5, Airport: 2.5, District: 2, Village: 1.5, Station: 1.5, Area: 1.5 };
+  const d = (p) => distanceKm(here, p);
+  const score = (p) => {
+    const n = norm(p.name);
+    return (n === nq ? 6 : n.startsWith(nq) ? 4 : n.split(/\s+/).some((w) => w.startsWith(nq)) ? 2.5 : n.includes(nq) ? 1.5 : 0) +
+      (p.rank || 0) + (typeScore[p.kind] || 1) + (d(p) < 50 ? 1.5 : d(p) < 300 ? 1 : d(p) < 1500 ? 0.5 : 0);
+  };
+  const seen = new Set();
+  return items
+    .map((p) => ({ p, s: score(p) }))
+    .sort((a, b) => b.s - a.s)
+    .map((x) => x.p)
+    .filter((p) => {
+      // The same town from two services counts once (same name within about 10 km).
+      const k = `${norm(p.name)}|${p.lat.toFixed(1)},${p.lon.toFixed(1)}`;
+      return !seen.has(k) && seen.add(k);
+    });
+}
+
+// Open-Meteo place search: cities, towns and airports. Fast, so its results are shown first.
+async function cityNameSearch(q, limit, signal) {
+  const r = await getJSON(
+    `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=${limit + 4}&language=${hasThai(q) ? "th" : "en"}&format=json`,
+    { timeout: 5000, retries: 1, ttl: 864e5, signal, source: "Place search" }
+  );
+  return (r.results || []).map((x) => {
+    const code = x.feature_code || "";
+    const [icon, kind] =
+      code.startsWith("AIR") ? ["✈️", "Airport"]
+      : code === "PCLI" ? PLACE_TYPES.country
+      : code.startsWith("ADM1") ? PLACE_TYPES.state
+      : code.startsWith("ADM") ? PLACE_TYPES.district
+      : code.startsWith("PPL") ? ((x.population || 0) >= 50000 || /^PPL(C|A)$/.test(code) ? PLACE_TYPES.city : PLACE_TYPES.town)
+      : ["📍", "Place"];
+    const where = [...new Set([x.admin2, x.admin1, x.country].filter((v) => v && v !== x.name))].slice(-2).join(", ");
+    return {
+      lat: x.latitude, lon: x.longitude, name: x.name, where, icon, kind,
+      label: where ? `${x.name}, ${where}` : x.name, cc: x.country_code || "",
+      rank: Math.min(3, Math.log10((x.population || 0) + 10) / 2), // bigger towns first
+    };
+  });
+}
+
+// → { items, error }.
+// `full` = the whole query was entered (Enter / Check route), so the slower backup may be used.
+// `onPartial(items)` gets the first results as soon as the fastest service answers.
+async function searchPlaces(q, { limit = 6, signal, full = false, onPartial } = {}) {
+  let items = [], error = null;
+  const top = () => rankPlaces(items, q).slice(0, limit);
+  // Three views of the same search, merged as they arrive: cities and towns (fast),
+  // well-known places anywhere, and places near the map (landmarks, shops, streets).
+  const results = await Promise.allSettled(
+    [cityNameSearch(q, limit, signal), photonSearch(q, limit, signal, false), photonSearch(q, limit, signal, true)]
+      .map((job) => job.then((found) => {
+        items = items.concat(found);
+        if (found.length) onPartial?.(top());
+      }))
+  );
+  if (signal?.aborted) throw new DOMException("The request was cancelled.", "AbortError");
+  if (results.every((r) => r.status === "rejected")) error = results[0].reason;
+  if (!items.length && (full || error)) {
+    try {
+      items = await nominatimSearch(q, limit, signal);
+      error = null;
+    } catch (err) {
+      if (isAbort(err)) throw err;
+      error = error || err;
+    }
+  }
+  return { items: top(), error };
+}
 
 async function geocode(q) {
   q = q.trim();
   if (picked.has(q)) return picked.get(q);
   const m = q.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
-  if (m) return { lat: +m[1], lon: +m[2], name: q };
-  const [best] = await searchPlaces(q, 1);
-  if (best) return best;
-  const res = await getJSON(
-    `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`
+  if (m) return { lat: +m[1], lon: +m[2], name: q, label: q };
+  const { items, error } = await searchPlaces(q, { limit: 5, full: true });
+  if (items.length) return items[0];
+  if (error) throw error;
+  const e = new Error(`Place not found: "${q}"`);
+  e.kind = "notfound";
+  throw e;
+}
+
+// Puts a place in a route box and remembers it.
+function setRoutePlace(id, place) {
+  picked.set(place.label, place);
+  $(id).value = place.label;
+  rememberPlace(place);
+}
+
+function useMyLocation(onDone) {
+  if (!navigator.geolocation) return alert("Location is not supported by this browser.");
+  navigator.geolocation.getCurrentPosition(
+    (p) => onDone({ lat: p.coords.latitude, lon: p.coords.longitude, name: "My location", label: "📍 My location", where: "", icon: "📍", kind: "" }),
+    (err) => alert(`Location unavailable: ${err.message}`),
+    { enableHighAccuracy: false, timeout: 10000 }
   );
-  if (!res.length) throw new Error(`Place not found: "${q}"`);
-  return { lat: +res[0].lat, lon: +res[0].lon, name: res[0].display_name.split(",").slice(0, 2).join(",") };
 }
 
-// Place search by name (Photon, OpenStreetMap data, allows search-as-you-type).
-// Results are biased toward the area currently shown on the map.
-const PLACE_ICONS = { city: "🏙", town: "🏘", village: "🏡", state: "🗺", country: "🌏", district: "📍", locality: "📍", street: "🛣", house: "🏢" };
-async function searchPlaces(q, limit = 6) {
-  const c = map.getCenter();
-  try {
-    const r = await getJSON(
-      `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=${limit}&lang=en` +
-      `&lat=${c.lat.toFixed(3)}&lon=${c.lng.toFixed(3)}`
-    );
-    const seen = new Set();
-    return r.features
-      .map((f) => {
-        const p = f.properties;
-        const where = [p.city !== p.name && p.city, p.state !== p.name && p.state, p.country !== p.name && p.country]
-          .filter(Boolean).join(", ");
-        return {
-          lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0],
-          name: p.name || p.street || q,
-          label: where ? `${p.name || p.street}, ${where}` : p.name || q,
-          where, icon: PLACE_ICONS[p.type] || "📍",
-        };
-      })
-      .filter((x) => !seen.has(x.label) && seen.add(x.label));
-  } catch {
-    return [];
-  }
+// Typed text shown in bold inside a result name.
+function markMatch(name, q) {
+  const i = name.toLowerCase().indexOf(q.toLowerCase());
+  return i < 0 || !q ? esc(name) : `${esc(name.slice(0, i))}<mark>${esc(name.slice(i, i + q.length))}</mark>${esc(name.slice(i + q.length))}`;
 }
 
-function setupSuggest(input) {
+// Suggestion list for a text box: recent places when empty, live results while typing.
+// opts: onChoose(place), myLocation (offer "Use my location"), enterPicksFirst (Enter takes the top result)
+let suggestCount = 0;
+function setupSuggest(input, opts = {}) {
   const box = document.createElement("ul");
+  const uid = `suggest-${++suggestCount}`;
+  box.id = uid;
   box.className = "suggest hidden";
   box.setAttribute("role", "listbox");
   input.parentElement.appendChild(box);
-  let items = [], active = -1, timer, seq = 0;
+  input.setAttribute("role", "combobox");
+  input.setAttribute("aria-autocomplete", "list");
+  input.setAttribute("aria-controls", uid);
+  input.setAttribute("aria-expanded", "false");
+  let items = [], active = -1, timer, seq = 0, ctrl = null, query = "";
 
-  const close = () => { box.classList.add("hidden"); active = -1; };
+  const close = () => {
+    seq++;
+    ctrl?.abort();
+    clearTimeout(timer);
+    box.classList.add("hidden");
+    input.setAttribute("aria-expanded", "false");
+    input.removeAttribute("aria-activedescendant");
+    active = -1;
+  };
+  const open = (html) => {
+    box.innerHTML = html;
+    box.classList.remove("hidden");
+    input.setAttribute("aria-expanded", "true");
+  };
   const choose = (i) => {
     const it = items[i];
     if (!it) return;
-    input.value = it.label;
-    picked.set(it.label, it);
     close();
-    // Jump to the next empty box, or run the check when both are filled.
-    if (input.id === "route-from" && !$("route-to").value) $("route-to").focus();
-    else if ($("route-from").value && $("route-to").value) runRoute();
+    if (it.action === "me") return useMyLocation((place) => opts.onChoose(place, input));
+    opts.onChoose(it, input);
   };
-  const paint = () => {
-    box.innerHTML = items.length
-      ? items.map((it, i) => `
-        <li role="option" data-i="${i}" class="${i === active ? "active" : ""}">
-          <span class="ico">${it.icon}</span>
-          <span><b>${esc(it.name)}</b>${it.where ? `<br><small>${esc(it.where)}</small>` : ""}</span>
-        </li>`).join("")
-      : `<li class="none">No places found</li>`;
-    box.classList.remove("hidden");
+  const row = (it, i) => `
+    <li role="option" id="${uid}-${i}" data-i="${i}" class="${i === active ? "active" : ""}" aria-selected="${i === active}">
+      <span class="ico" aria-hidden="true">${it.icon}</span>
+      <span><b>${it.action ? esc(it.name) : markMatch(it.name, query)}</b>${it.kind ? ` <i class="kind">${esc(it.kind)}</i>` : ""}
+        ${it.where ? `<br><small>${esc(it.where)}</small>` : ""}</span>
+    </li>`;
+  const paint = (head = "", empty = "No places found. Try another spelling, or add the province or country.") => {
+    open((head ? `<li class="head">${head}</li>` : "") + (items.length ? items.map(row).join("") : `<li class="none">${empty}</li>`));
+    if (active >= 0) {
+      input.setAttribute("aria-activedescendant", `${uid}-${active}`);
+      box.querySelector(".active")?.scrollIntoView({ block: "nearest" });
+    } else input.removeAttribute("aria-activedescendant");
+  };
+  let head = "";
+  const showRecent = () => {
+    query = "";
+    items = [
+      ...(opts.myLocation ? [{ action: "me", name: "Use my location", icon: "📍", where: "", kind: "" }] : []),
+      ...recentPlaces(),
+    ];
+    active = -1;
+    head = items.length > (opts.myLocation ? 1 : 0) ? "Recent places" : "";
+    if (items.length) paint(head);
   };
 
+  input.addEventListener("focus", () => { if (!input.value.trim()) showRecent(); });
   input.addEventListener("input", () => {
     clearTimeout(timer);
+    ctrl?.abort();
     const q = input.value.trim();
+    if (!q) return showRecent();
     if (q.length < 2) return close();
+    const my = ++seq;
     timer = setTimeout(async () => {
-      const my = ++seq;
-      box.innerHTML = `<li class="none"><i class="spinner"></i>Searching…</li>`;
-      box.classList.remove("hidden");
-      const res = await searchPlaces(q);
-      if (my !== seq) return; // a newer search has started
-      items = res;
-      active = -1;
-      paint();
-    }, 250);
+      ctrl = new AbortController();
+      const more = `<li class="none more"><i class="spinner"></i>Searching…</li>`;
+      // Results of the previous query stay visible while typing; recent places are replaced.
+      if (box.classList.contains("hidden") || !items.length || !query) { items = []; open(more); }
+      try {
+        const res = await searchPlaces(q, {
+          signal: ctrl.signal,
+          // First results appear as soon as the fastest service answers; slower ones are added after.
+          onPartial(found) {
+            if (my !== seq || document.activeElement !== input || active >= 0) return;
+            query = q;
+            items = found;
+            head = "";
+            paint();
+            box.insertAdjacentHTML("beforeend", more);
+          },
+        });
+        if (my !== seq || document.activeElement !== input) return; // a newer search started, or the box was left
+        query = q;
+        if (active < 0) items = res.items; // don't reshuffle the list under the arrow keys
+        head = "";
+        paint("", res.error
+          ? "Search is unavailable right now. Type the full name and press Enter to try again."
+          : undefined);
+      } catch { /* cancelled by a newer search */ }
+    }, 220);
   });
   input.addEventListener("keydown", (e) => {
-    if (box.classList.contains("hidden") || !items.length) return;
-    if (e.key === "ArrowDown") { active = (active + 1) % items.length; paint(); e.preventDefault(); }
-    else if (e.key === "ArrowUp") { active = (active - 1 + items.length) % items.length; paint(); e.preventDefault(); }
-    else if (e.key === "Enter" && active >= 0) { choose(active); e.preventDefault(); }
-    else if (e.key === "Escape") close();
+    const isOpen = !box.classList.contains("hidden") && items.length;
+    if (e.key === "Escape") return close();
+    if (e.key === "Enter") {
+      if (isOpen && active >= 0) { e.preventDefault(); return choose(active); }
+      if (opts.enterPicksFirst) {
+        e.preventDefault();
+        if (isOpen && query === input.value.trim()) return choose(0);
+        return opts.onEnter?.(input.value.trim(), close);
+      }
+      return close();
+    }
+    if (!isOpen) return;
+    if (e.key === "ArrowDown") { active = (active + 1) % items.length; paint(head); e.preventDefault(); }
+    else if (e.key === "ArrowUp") { active = (active - 1 + items.length) % items.length; paint(head); e.preventDefault(); }
   });
   box.addEventListener("mousedown", (e) => {
     const li = e.target.closest("li[data-i]");
-    if (li) { e.preventDefault(); choose(+li.dataset.i); }
+    e.preventDefault(); // keep focus in the box
+    if (li) choose(+li.dataset.i);
   });
   input.addEventListener("blur", () => setTimeout(close, 150));
+  return { close };
 }
-setupSuggest($("route-from"));
-setupSuggest($("route-to"));
+
+// Start and destination boxes: picking a place moves on, and runs the check once both are filled.
+function chooseRoutePlace(place, input) {
+  setRoutePlace(input.id, place);
+  if (input.id === "route-from" && !$("route-to").value) $("route-to").focus();
+  else if ($("route-from").value && $("route-to").value) runRoute();
+}
+setupSuggest($("route-from"), { onChoose: chooseRoutePlace, myLocation: true });
+setupSuggest($("route-to"), { onChoose: chooseRoutePlace });
+
+// Search box on the map: fly to a place and show its weather.
+function goToPlace(place) {
+  rememberPlace(place);
+  $("map-search").value = place.label;
+  $("map-search").blur();
+  map.flyTo([place.lat, place.lon], Math.max(map.getZoom(), ["City", "Province", "Country"].includes(place.kind) ? 10 : 13), { duration: 0.8 });
+  showWeatherPopup(L.latLng(place.lat, place.lon), place);
+}
+setupSuggest($("map-search"), {
+  onChoose: goToPlace,
+  myLocation: true,
+  enterPicksFirst: true,
+  async onEnter(q, close) {
+    if (q.length < 2) return;
+    close();
+    try {
+      goToPlace(await geocode(q));
+    } catch (err) {
+      L.popup().setLatLng(map.getCenter()).setContent(esc(err.kind === "notfound" ? err.message : errorText(err, "Place search"))).openOn(map);
+    }
+  },
+});
+
+// ---------- Geo helpers ----------
 
 async function reverseName(lat, lon) {
   try {
@@ -373,11 +626,36 @@ async function pointWeatherHTML(lat, lon) {
   }
 }
 
-map.on("click", async (e) => {
-  const popup = L.popup().setLatLng(e.latlng).setContent("Loading weather…").openOn(map);
-  const [html, name] = await Promise.all([pointWeatherHTML(e.latlng.lat, e.latlng.lng), reverseName(e.latlng.lat, e.latlng.lng)]);
-  popup.setContent(`${name ? `<b>${esc(name)}</b><br>` : ""}${html}`);
-});
+// Weather popup for a point (map click or a searched place), with shortcuts to route from or to it.
+let popupPlace = null;
+async function showWeatherPopup(latlng, place) {
+  const popup = L.popup({ maxWidth: 320 }).setLatLng(latlng).setContent(`<i class="spinner"></i>Loading weather…`).openOn(map);
+  const [html, name] = await Promise.all([
+    pointWeatherHTML(latlng.lat, latlng.lng),
+    place?.name || reverseName(latlng.lat, latlng.lng),
+  ]);
+  const title = name || `${latlng.lat.toFixed(3)}, ${latlng.lng.toFixed(3)}`;
+  popupPlace = place?.label && !place.label.startsWith("📍") ? place
+    : { lat: latlng.lat, lon: latlng.lng, name: title, label: name ? `${name} (${latlng.lat.toFixed(3)}, ${latlng.lng.toFixed(3)})` : title, where: "", icon: "📍", kind: "" };
+  popup.setContent(
+    `<b>${esc(title)}</b>${place?.where ? `<br><small class="muted">${esc(place.where)}</small>` : ""}<br>${html}` +
+    `<div class="popup-actions"><button type="button" data-route="route-from">Route from here</button>` +
+    `<button type="button" data-route="route-to">Route to here</button></div>`
+  );
+}
+map.on("click", (e) => showWeatherPopup(e.latlng));
+
+// "Route from/to here" in a weather popup.
+// (Capture phase, because Leaflet stops clicks inside popups from bubbling.)
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest?.("[data-route]");
+  if (!btn || !popupPlace) return;
+  setRoutePlace(btn.dataset.route, popupPlace);
+  map.closePopup();
+  showTab("route");
+  if ($("route-from").value && $("route-to").value) runRoute();
+  else $(btn.dataset.route === "route-from" ? "route-to" : "route-from").focus();
+}, true);
 
 // ---------- Route evaluation ----------
 // Conditions along one route for a departure `departH` hours from now.
@@ -412,6 +690,10 @@ function evaluate(alt, departH) {
 async function planRoute(fromQ, toQ, departH) {
   loading("Finding places…");
   const [from, to] = await Promise.all([geocode(fromQ), geocode(toQ)]);
+  // Show which places were actually used, so a wrong match is easy to spot and fix.
+  [["route-from", from], ["route-to", to]].forEach(([id, p]) => {
+    if (p.label && !p.label.startsWith("📍")) setRoutePlace(id, p);
+  });
 
   loading("Calculating routes…");
   const r = await getJSON(
@@ -786,15 +1068,10 @@ $("route-result").addEventListener("click", (e) => {
 });
 
 $("btn-from-me").addEventListener("click", () => {
-  navigator.geolocation?.getCurrentPosition(
-    (p) => {
-      const label = "📍 My location";
-      picked.set(label, { lat: p.coords.latitude, lon: p.coords.longitude, name: "My location" });
-      $("route-from").value = label;
-      $("route-to").focus();
-    },
-    (err) => alert(`Location unavailable: ${err.message}`)
-  );
+  useMyLocation((place) => {
+    setRoutePlace("route-from", place);
+    $("route-to").focus();
+  });
 });
 
 ["near-route", "near-route-km"].forEach((id) =>

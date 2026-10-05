@@ -47,12 +47,12 @@
         <form id="route-form" class="card">
           <div class="route-field">
             <span class="pin start"></span>
-            <input id="route-from" placeholder="From: search a place, e.g. Bangkok" required autocomplete="off" />
+            <input id="route-from" type="search" placeholder="From: city, landmark or address" aria-label="From" required autocomplete="off" />
             <button type="button" id="btn-from-me" title="Use my location" aria-label="Use my location">◎</button>
           </div>
           <div class="route-field">
             <span class="pin end"></span>
-            <input id="route-to" placeholder="To: search a place, e.g. Chiang Mai" required autocomplete="off" />
+            <input id="route-to" type="search" placeholder="To: city, landmark or address" aria-label="To" required autocomplete="off" />
             <button type="button" id="btn-swap" title="Swap start and destination" aria-label="Swap">⇅</button>
           </div>
           <div class="route-when">
@@ -127,13 +127,16 @@
         <span><i class="dot sev-0"></i>Green</span>
         <span><i class="dot sev-info"></i>Info</span>
       </div>
+      <div class="map-search route-field">
+        <input id="map-search" type="search" placeholder="🔍 Search a place on the map" aria-label="Search a place on the map" autocomplete="off" />
+      </div>
       <div class="radar-player hidden" id="radar-player">
         <button type="button" id="radar-play" aria-label="Play or pause radar">▶</button>
         <input type="range" id="radar-slider" min="0" max="0" value="0" aria-label="Radar time" />
         <span id="radar-time">Loading…</span>
       </div>
       <div class="wind-legend hidden" id="wind-legend"></div>
-      <div class="map-hint" id="map-hint">Tip: click anywhere on the map for weather, air quality &amp; river levels</div>
+      <div class="map-hint" id="map-hint">Tip: search a place or click the map for weather, air quality &amp; river levels</div>
       <article class="detail hidden" id="detail"></article>
     </div>
   </main>
