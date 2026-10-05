@@ -28,10 +28,17 @@ They're fine for personal use and sharing with friends. For heavy public traffic
 
 ## Features
 
-**Route check** (the Route check tab)
-- Search places by name as you type, in English or Thai: cities, districts, landmarks, malls, hotels. Use the arrow keys or click to pick one. You can also use **My location**, type `lat,lon`, or tap an example route.
+**Home**
+- An overview for one place: the weather now, the next hours, wind, air quality, and alerts within 1,000 km.
+- Search any place to check it, or use your location. The place is remembered on your device.
+- Shortcuts into the three modes: Route, Alerts and Weather map. On phones the modes are a bar at the bottom.
+
+**Route check** (the Route mode)
+- Search places by name as you type, in English or Thai: cities, districts, landmarks, malls, hotels. Suggestions show the place type, your recent places and **Use my location**. Use the arrow keys or click to pick one. You can also type `lat,lon` or tap an example route.
+- The place the app actually used is written back into the box, so a wrong match is easy to spot.
 - Up to 3 alternative routes are compared. The **safest** one is selected automatically, and the fastest is labeled.
-- **Best time to leave** compares leaving now, and in 1, 2, 3, 6, 12 and 24 hours. The best option is marked.
+- **Pick a departure date and time**, up to 14 days ahead, or leave now. The forecast follows the time you pick. Trips more than 3 days away are marked as a rough guide.
+- **Best time to leave** compares your time with leaving 1, 2, 3, 6, 12 and 24 hours later. The best option is marked.
 - At each checkpoint along the route, forecast for **the time you would arrive there**:
   - weather: thunderstorms, heavy rain or snow, fog, strong gusts, low visibility, extreme heat or cold
   - wind: arrow, speed and direction, whether it's a headwind, tailwind or crosswind for your car, and which way the weather is moving. Strong crosswinds are flagged.
@@ -40,7 +47,7 @@ They're fine for personal use and sharing with friends. For heavy public traffic
 - Alerts within 50–500 km of the route, plus an overall verdict and tips, such as "Leaving at 6 PM lowers the risk".
 - **Share this route**: the route is stored in the page link, so you can send it or bookmark it.
 
-**Alerts** (the Alerts tab and the map)
+**Alerts** (the Alerts mode)
 - Earthquakes, tropical cyclones, floods, volcanoes, droughts, wildfires, severe storms and more.
   Markers are colored by severity, and red ones pulse. Alerts refresh every 5 minutes.
 - Search, filter by source and severity, and sort by newest, severity or distance from you (**Near me**).
@@ -48,8 +55,10 @@ They're fine for personal use and sharing with friends. For heavy public traffic
   **Open in Google Maps**; and a link to the official report.
 - **Notify**: sends a browser notification when a new Orange or Red alert appears.
 
-**Map**
-- Click anywhere for the weather, air quality and river flow there.
+**Weather map** (full-screen map)
+- A search box on the map: fly to a place and see its weather.
+- Click anywhere for the weather, air quality and river flow there, with **Route from here** and **Route to here**.
+- **Rain radar** and **Wind** buttons on the map switch those layers on and off.
 - **Weather direction** (layers button, top right):
   - **🌧 Rain radar (moving, last 2 h)**: plays the last 2 hours of radar in a loop, so you can see which way rain is moving. It has a play/pause button and a time slider.
   - **💨 Wind direction**: arrows show where the wind blows. Arrow color and length show the speed. Hover an arrow for details and the direction weather is drifting.
@@ -87,7 +96,7 @@ This is a guide, not an official warning. Always check local authorities in seve
 | River flood forecast | Open-Meteo Flood API (GloFAS) |
 | Live rain radar | RainViewer |
 | Routing | OSRM (OpenStreetMap) |
-| Place search / names | Photon (search-as-you-type), OpenStreetMap Nominatim, BigDataCloud |
+| Place search / names | Open-Meteo Geocoding and Photon (search-as-you-type), OpenStreetMap Nominatim (backup), BigDataCloud |
 | Map tiles | OpenStreetMap, Esri satellite, CARTO dark |
 
 Google Maps has no public alerts API, and its crisis alerts come from agencies like these.
@@ -100,4 +109,6 @@ The app links each alert to Google Maps.
 - `app.js`: alert sources, map, alert list, detail panel, tabs and notifications
 - `route.js`: routes, weather, air quality, floods, risk scoring and recommendations
 - `wind.js`: moving rain radar and wind-direction arrows
+- `home.js`: the Home page
+- `net.js`: shared request layer (timeouts, retries, cache)
 - `serve.ps1`: tiny local web server

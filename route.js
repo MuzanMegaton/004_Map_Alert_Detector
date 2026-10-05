@@ -841,10 +841,10 @@ function renderRouteResult() {
   const worstAlert = ev.alerts.length ? ev.alerts[0].a.severity : -2;
   const [risk, riskColor] = riskLabel(ev.score);
   let level, head, text;
-  if (worstAlert >= 3) { level = 3; head = "⛔ Serious alert nearby"; text = "Check official sources before travelling."; }
-  else if (ev.score >= 20) { level = 2; head = "⚠️ Travel with caution"; text = "There are hazards on this route."; }
-  else if (ev.score >= 5) { level = 1; head = "🟡 Mostly fine"; text = "Some weather or alerts to watch along the way."; }
-  else { level = 0; head = "✅ Good to go"; text = "No major hazards found along the route."; }
+  if (worstAlert >= 3) { level = 3; head = "Serious alert nearby"; text = "Check official sources before travelling."; }
+  else if (ev.score >= 20) { level = 2; head = "Travel with caution"; text = "There are hazards on this route."; }
+  else if (ev.score >= 5) { level = 1; head = "Mostly fine"; text = "Some weather or alerts to watch along the way."; }
+  else { level = 0; head = "Good to go"; text = "No major hazards found along the route."; }
   const tips = [];
   if (safest !== R.sel) tips.push(`Route ${safest + 1} is safer (${riskLabel(routeEvals[safest].score)[0]} risk).`);
   if (bestDep && bestDep.departH !== R.depart && bestDep.score <= ev.score - 5)
@@ -856,7 +856,7 @@ function renderRouteResult() {
     <div class="verdict" style="--c:${sevColor(level)}">
       <div class="head">${head}</div>
       <div>${text}</div>
-      ${tips.length ? `<ul>${tips.map((t) => `<li>💡 ${esc(t)}</li>`).join("")}</ul>` : ""}
+      ${tips.length ? `<ul>${tips.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>` : ""}
     </div>
     <div class="route-summary">
       <div class="stat">Distance<b>${Math.round(alt.km).toLocaleString()} km</b></div>
@@ -865,7 +865,7 @@ function renderRouteResult() {
       <div class="stat link" id="stat-alerts" title="Show these alerts">Alerts ≤${nearKm} km<b>${ev.alerts.length}</b></div>
       <div class="stat">Warnings<b>${ev.warnings}</b></div>
     </div>
-    <div class="share-row"><button type="button" id="btn-share">🔗 Share this route</button></div>
+    <div class="share-row"><button type="button" id="btn-share">Share this route</button></div>
 
     ${R.alts.length > 1 ? `
     <h3 class="sub-h">Route options</h3>
@@ -981,7 +981,7 @@ function saveToURL() {
   };
   const p = new URLSearchParams({ from: val("route-from"), to: val("route-to"), dep: $("route-depart").value });
   if (!p.get("dep")) p.delete("dep");
-  history.replaceState(null, "", `?${p}`);
+  history.replaceState(null, "", `?${p}${location.hash}`);
 }
 
 async function runRoute() {
@@ -1018,11 +1018,11 @@ $("route-result").addEventListener("click", async (e) => {
     const btn = e.target.closest("#btn-share");
     try {
       await navigator.clipboard.writeText(location.href);
-      btn.textContent = "✓ Link copied";
+      btn.textContent = "Link copied";
     } catch {
       prompt("Copy this link:", location.href);
     }
-    setTimeout(() => (btn.textContent = "🔗 Share this route"), 2000);
+    setTimeout(() => (btn.textContent = "Share this route"), 2000);
   }
 });
 
@@ -1056,7 +1056,7 @@ $("btn-depart-now").addEventListener("click", () => {
 $("btn-route-clear").addEventListener("click", () => {
   clearRoute();
   showHint();
-  history.replaceState(null, "", location.pathname);
+  history.replaceState(null, "", location.pathname + location.hash);
 });
 
 $("btn-swap").addEventListener("click", () => {

@@ -127,15 +127,15 @@ async function loadWind() {
   }
 }
 
-map.on("moveend", () => {
+map.on("moveend resize", () => {
   if (!map.hasLayer(windLayer)) return;
   clearTimeout(windTimer);
   windTimer = setTimeout(loadWind, 500);
 });
 
 // ---------- Layer switcher + legend ----------
-layerControl.addOverlay(radar.group, "🌧 Rain radar (moving, last 2 h)");
-layerControl.addOverlay(windLayer, "💨 Wind direction");
+layerControl.addOverlay(radar.group, "Rain radar (moving, last 2 h)");
+layerControl.addOverlay(windLayer, "Wind direction");
 
 map.on("overlayadd", (e) => {
   if (e.layer === radar.group) {
@@ -160,3 +160,20 @@ $("wind-legend").innerHTML =
 loadRadarFrames();
 setInterval(loadRadarFrames, 10 * 60 * 1000);
 setInterval(() => map.hasLayer(windLayer) && loadWind(), 15 * 60 * 1000);
+
+// ---------- Quick layer buttons on the map ----------
+const CHIP_LAYERS = { radar: radar.group, wind: windLayer };
+function syncLayerChips() {
+  document.querySelectorAll("#layer-chips [data-layer]").forEach((b) => {
+    const on = map.hasLayer(CHIP_LAYERS[b.dataset.layer]);
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-pressed", on);
+  });
+}
+$("layer-chips").addEventListener("click", (e) => {
+  const layer = CHIP_LAYERS[e.target.closest("[data-layer]")?.dataset.layer];
+  if (!layer) return;
+  if (map.hasLayer(layer)) map.removeLayer(layer);
+  else map.addLayer(layer);
+});
+map.on("overlayadd overlayremove", syncLayerChips);

@@ -285,6 +285,7 @@ async function loadAll() {
   $("status-text").title = errors.join(" | ");
   render();
   if (state.route) renderRouteResult();
+  if (document.body.dataset.mode === "home") window.renderHome?.();
 }
 
 // ---------- Filtering & rendering ----------
@@ -434,13 +435,25 @@ function announce(newAlerts) {
 }
 
 // ---------- UI wiring ----------
-function showTab(name) {
-  document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
-  document.querySelectorAll(".tab-panel").forEach((p) => p.classList.toggle("hidden", p.id !== `tab-${name}`));
+// The app has four modes, each with its own layout: home (overview page), route and alerts
+// (side panel + map) and map (full-screen weather map).
+function setMode(mode, { push = true } = {}) {
+  if (!["home", "route", "alerts", "map"].includes(mode)) mode = "home";
+  document.body.dataset.mode = mode;
+  document.querySelectorAll("#modes button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.mode === mode);
+    b.setAttribute("aria-current", b.dataset.mode === mode ? "page" : "false");
+  });
+  document.querySelectorAll(".tab-panel").forEach((p) => p.classList.toggle("hidden", p.id !== `tab-${mode}`));
+  document.querySelector(".sidebar").scrollTop = 0;
+  if (push && location.hash !== `#${mode}`) history.replaceState(null, "", `${location.pathname}${location.search}#${mode}`);
+  if (mode === "home") window.renderHome?.();
+  else setTimeout(() => map.invalidateSize(), 0); // the map changes size between modes
 }
-document.querySelector(".tabs").addEventListener("click", (e) => {
-  const b = e.target.closest("[data-tab]");
-  if (b) showTab(b.dataset.tab);
+const showTab = setMode; // older name, still used by the route and alert code
+$("modes").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-mode]");
+  if (b) setMode(b.dataset.mode);
 });
 
 // The "click the map" tip disappears after the first click or 12 seconds.
