@@ -220,7 +220,7 @@ async function floodFor(points) {
   try {
     const data = asList(await getJSON(
       `https://flood-api.open-meteo.com/v1/flood?${coordParams(points)}` +
-      `&daily=river_discharge&past_days=365&forecast_days=7`
+      `&daily=river_discharge&past_days=365&forecast_days=16`
     ));
     const today = new Date().toISOString().slice(0, 10);
     return data.map((d) => {
@@ -436,7 +436,8 @@ async function planRoute(fromQ, toQ, departH) {
   // One request per data type covers every checkpoint of every route.
   loading(`Checking weather, air quality and rivers on ${alts.length} route${alts.length > 1 ? "s" : ""}…`);
   const allPts = alts.flatMap((a) => a.pts);
-  const hours = Math.ceil(Math.max(...DEPARTURES) + Math.max(...alts.map((a) => a.hours))) + 3;
+  // Enough forecast for the chosen departure, the later options compared with it, and the drive.
+  const hours = Math.ceil(departH + Math.max(...DEPARTURES) + Math.max(...alts.map((a) => a.hours))) + 3;
   const [wx, air, flood, names] = await Promise.all([
     weatherFor(allPts, hours),
     airFor(allPts, hours),
@@ -455,7 +456,7 @@ async function planRoute(fromQ, toQ, departH) {
     o += n;
   }
 
-  state.route = { from, to, alts, sel: 0, depart: departH, fetchedAt: Date.now() };
+  state.route = { from, to, alts, sel: 0, depart: departH, base: departH, fetchedAt: Date.now() };
   // Start on the safest route for the chosen departure time.
   state.route.sel = safestIndex(departH);
   $("near-route-wrap").classList.remove("hidden");
@@ -527,13 +528,18 @@ function selectAlt(i) {
 
 function setDeparture(h) {
   state.route.depart = h;
-  $("route-depart").value = String(h);
+  $("route-depart").value = h > 0 ? toLocalInput(state.route.fetchedAt + h * 3600e3) : "";
+  updateWhenHint();
   saveToURL();
   drawRoute();
   renderRouteResult();
 }
 
-const fmtTime = (ms) => new Date(ms).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
+// Weekday and time; the date is added when it is more than 6 days away, where a weekday alone is ambiguous.
+const fmtTime = (ms) => new Date(ms).toLocaleString([], {
+  weekday: "short", hour: "2-digit", minute: "2-digit",
+  ...(Math.abs(ms - Date.now()) > 6 * 864e5 ? { day: "numeric", month: "short" } : {}),
+});
 const fmtDur = (h) => `${Math.floor(h)} h ${Math.round((h % 1) * 60)} min`;
 
 function renderRouteResult() {
@@ -546,7 +552,8 @@ function renderRouteResult() {
   const routeEvals = R.alts.map((a) => evaluate(a, R.depart));
   const safest = safestIndex(R.depart);
   const fastest = R.alts.reduce((b, a, i) => (a.hours < R.alts[b].hours ? i : b), 0);
-  const departEvals = DEPARTURES.map((h) => evaluate(alt, h)).filter((e) => e.covered);
+  const departEvals = DEPARTURES.map((h) => evaluate(alt, R.base + h)).filter((e) => e.covered);
+  const farAhead = R.depart > 72;
   const bestDep = departEvals.reduce((b, e) => (e.score < b.score ? e : b), departEvals[0]);
 
   const worstAlert = ev.alerts.length ? ev.alerts[0].a.severity : -2;
@@ -593,7 +600,7 @@ function renderRouteResult() {
       }).join("")}
     </div>` : ""}
 
-    <h3 class="sub-h">Best time to leave</h3>
+    <h3 class="sub-h">${R.base ? "Your time and later options" : "Best time to leave"}</h3>
     <div class="options" id="depart-options">
       ${departEvals.map((e) => {
         const [rl, rc] = riskLabel(e.score);
@@ -602,7 +609,7 @@ function renderRouteResult() {
           <span><b>${e.departH ? `Leave ${fmtTime(e.departMs)}` : "Leave now"}</b>
             <span class="sub">→ arrive ${fmtTime(e.departMs + alt.hours * 3600e3)}</span></span>
           <span class="sub">${e.warnings} warn.</span>
-          <span><b style="color:${rc}">${rl}</b>${e === bestDep ? ` <i class="tag safe">Best</i>` : ""}</span>
+          <span><b style="color:${rc}">${rl}</b>${e === bestDep ? ` <i class="tag safe">Best</i>` : ""}${R.base && e.departH === R.base ? ` <i class="tag">Your time</i>` : ""}</span>
         </button>`;
       }).join("")}
     </div>
@@ -618,7 +625,7 @@ function renderRouteResult() {
           <span class="emoji">${emoji}</span>
           <span>
             <span class="where">${esc(c.name)}</span> <span class="sub">km ${Math.round(c.km)}</span><br>
-            <span class="sub">ETA ${new Date(c.eta).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} ·
+            <span class="sub">ETA ${fmtTime(c.eta)} ·
               ${label} · 💧${c.h.precipitation_probability ?? "–"}%<br>${windHTML(c.h, c.heading)}${
               c.h.us_aqi != null ? ` · <span style="color:${aqiInfo(c.h.us_aqi)[1]}">AQI ${c.h.us_aqi}</span>` : ""}${
               c.flood ? ` · 🌊 ${Math.round(c.flood.q).toLocaleString()} m³/s` : ""}</span>
@@ -628,7 +635,7 @@ function renderRouteResult() {
         </li>`;
       }).join("")}
     </ul>
-    <p class="muted" style="font-size:12px">Weather and air are forecasts for when you reach each point.
+    <p class="muted" style="font-size:12px">${farAhead ? "<b>This trip is more than 3 days away, so treat the forecast as a rough guide and check again closer to the day.</b> " : ""}Weather and air are forecasts for when you reach each point.
       River flow is compared with the past year at the same spot. Alerts near the route are listed below.</p>`;
 }
 
@@ -650,6 +657,39 @@ function clearRoute() {
   render();
 }
 
+// ---------- Departure date and time ----------
+const MAX_AHEAD_DAYS = 14; // weather forecasts reach about 16 days
+// Value for a datetime-local input, in the viewer's own time zone.
+const toLocalInput = (ms) => new Date(ms - new Date(ms).getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+
+// Hours from now until the chosen departure. 0 means "leave now" (empty or past date).
+function chosenDepartH() {
+  const input = $("route-depart");
+  const ms = input.value ? new Date(input.value).getTime() : NaN;
+  if (Number.isNaN(ms) || ms <= Date.now() + 60000) {
+    input.value = "";
+    updateWhenHint();
+    return 0;
+  }
+  const h = Math.min((ms - Date.now()) / 3600e3, MAX_AHEAD_DAYS * 24);
+  if (h === MAX_AHEAD_DAYS * 24) input.value = toLocalInput(Date.now() + h * 3600e3);
+  return h;
+}
+
+function updateWhenHint() {
+  const input = $("route-depart");
+  input.min = toLocalInput(Date.now());
+  input.max = toLocalInput(Date.now() + MAX_AHEAD_DAYS * 864e5);
+  const ms = input.value ? new Date(input.value).getTime() : NaN;
+  const days = (ms - Date.now()) / 864e5;
+  $("route-when-hint").textContent =
+    Number.isNaN(ms) || days <= 0 ? "Leaving now. Pick a date and time to see the forecast for a later trip."
+    : days > MAX_AHEAD_DAYS ? `Forecasts reach ${MAX_AHEAD_DAYS} days ahead, so the latest time is used.`
+    : days > 3 ? `Leaving ${fmtTime(ms)}. Forecasts more than 3 days ahead are a rough guide.`
+    : `Leaving ${fmtTime(ms)}.`;
+  $("btn-depart-now").classList.toggle("active", Number.isNaN(ms) || days <= 0);
+}
+
 // The current route lives in the page URL, so it can be shared, bookmarked or reloaded.
 function saveToURL() {
   // "My location" only means something on this device, so share its coordinates instead.
@@ -658,6 +698,7 @@ function saveToURL() {
     return p && v.startsWith("📍") ? `${p.lat.toFixed(5)},${p.lon.toFixed(5)}` : v;
   };
   const p = new URLSearchParams({ from: val("route-from"), to: val("route-to"), dep: $("route-depart").value });
+  if (!p.get("dep")) p.delete("dep");
   history.replaceState(null, "", `?${p}`);
 }
 
@@ -666,7 +707,7 @@ async function runRoute() {
   btn.disabled = true;
   btn.textContent = "Checking…";
   try {
-    await planRoute($("route-from").value, $("route-to").value, Number($("route-depart").value));
+    await planRoute($("route-from").value, $("route-to").value, chosenDepartH());
     saveToURL();
   } catch (err) {
     clearRoute();
@@ -704,12 +745,14 @@ $("route-result").addEventListener("click", async (e) => {
 });
 
 showHint();
+updateWhenHint();
 {
   const p = new URLSearchParams(location.search);
   if (p.get("from") && p.get("to")) {
     $("route-from").value = p.get("from");
     $("route-to").value = p.get("to");
-    if ($("route-depart").querySelector(`option[value="${CSS.escape(p.get("dep") || "0")}"]`)) $("route-depart").value = p.get("dep") || "0";
+    // A shared departure date and time is used only while it is still in the future.
+    if (/^\d{4}-\d\d-\d\dT\d\d:\d\d/.test(p.get("dep") || "")) $("route-depart").value = p.get("dep");
     // Wait for alerts to load so the route check includes them.
     const wait = setInterval(() => {
       if (state.alerts.length || !state.firstLoad) { clearInterval(wait); runRoute(); }
@@ -717,8 +760,15 @@ showHint();
   }
 }
 
-$("route-depart").addEventListener("change", (e) => {
-  if (state.route) setDeparture(Number(e.target.value));
+// A new date or time needs a fresh forecast for that period, so the route is checked again.
+$("route-depart").addEventListener("change", () => {
+  updateWhenHint();
+  if (state.route) runRoute();
+});
+$("btn-depart-now").addEventListener("click", () => {
+  $("route-depart").value = "";
+  updateWhenHint();
+  if (state.route) runRoute();
 });
 
 $("btn-route-clear").addEventListener("click", () => {

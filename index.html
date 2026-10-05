@@ -55,16 +55,13 @@
             <input id="route-to" placeholder="To: search a place, e.g. Chiang Mai" required autocomplete="off" />
             <button type="button" id="btn-swap" title="Swap start and destination" aria-label="Swap">⇅</button>
           </div>
+          <div class="route-when">
+            <label for="route-depart">Leave</label>
+            <input type="datetime-local" id="route-depart" aria-describedby="route-when-hint" />
+            <button type="button" id="btn-depart-now" title="Leave now">Now</button>
+          </div>
+          <div class="route-when-hint" id="route-when-hint">Leaving now. Pick a date and time to see the forecast for a later trip.</div>
           <div class="route-actions">
-            <select id="route-depart" aria-label="Departure time">
-              <option value="0">Leave now</option>
-              <option value="1">Leave in 1 h</option>
-              <option value="2">Leave in 2 h</option>
-              <option value="3">Leave in 3 h</option>
-              <option value="6">Leave in 6 h</option>
-              <option value="12">Leave in 12 h</option>
-              <option value="24">Leave in 24 h</option>
-            </select>
             <button type="submit" class="primary-btn">Check route</button>
             <button type="button" id="btn-route-clear">Clear</button>
           </div>
