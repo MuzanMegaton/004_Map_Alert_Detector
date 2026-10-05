@@ -378,9 +378,9 @@ function goToPlace(place) {
   rememberPlace(place);
   $("map-search").value = place.label;
   $("map-search").blur();
-  // The popup opens after the map has arrived; opening it earlier would stop the move half-way.
-  map.once("moveend", () => showWeatherPopup(L.latLng(place.lat, place.lon), place));
-  map.setView([place.lat, place.lon], Math.max(map.getZoom(), ["City", "Province", "Country"].includes(place.kind) ? 10 : 13));
+  // Jump straight there (no animation), then open the popup: an animated move can be cut short by the popup.
+  map.setView([place.lat, place.lon], Math.max(map.getZoom(), ["City", "Province", "Country"].includes(place.kind) ? 10 : 13), { animate: false });
+  showWeatherPopup(L.latLng(place.lat, place.lon), place);
 }
 setupSuggest($("map-search"), {
   onChoose: goToPlace,
@@ -453,11 +453,16 @@ const coordParams = (points) =>
   `latitude=${points.map((p) => p.lat.toFixed(4)).join(",")}&longitude=${points.map((p) => p.lon.toFixed(4)).join(",")}`;
 const asList = (d) => (Array.isArray(d) ? d : [d]);
 
+// Route data requests: a short first try, then up to two retries within 24 s,
+// so one stalled connection does not fail the whole check.
+const NET_ROUTE = { timeout: 8000, budget: 24000, retries: 2 };
+
 async function weatherFor(points, hours = 48) {
   const data = await getJSON(
     `https://api.open-meteo.com/v1/forecast?${coordParams(points)}` +
     `&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,precipitation,wind_speed_10m,wind_gusts_10m,wind_direction_10m,wind_speed_700hPa,wind_direction_700hPa` +
-    `&hourly=${HOURLY}&forecast_hours=${Math.min(hours, 384)}&timeformat=unixtime&timezone=GMT`
+    `&hourly=${HOURLY}&forecast_hours=${Math.min(hours, 384)}&timeformat=unixtime&timezone=GMT`,
+    NET_ROUTE
   );
   return asList(data);
 }
@@ -468,7 +473,8 @@ async function airFor(points, hours = 48) {
     const data = await getJSON(
       `https://air-quality-api.open-meteo.com/v1/air-quality?${coordParams(points)}` +
       `&current=us_aqi,pm2_5,pm10&hourly=us_aqi,pm2_5&forecast_hours=${Math.min(hours, 96)}` +
-      `&timeformat=unixtime&timezone=GMT`
+      `&timeformat=unixtime&timezone=GMT`,
+      NET_ROUTE
     );
     return asList(data);
   } catch {
@@ -482,7 +488,8 @@ async function floodFor(points) {
   try {
     const data = asList(await getJSON(
       `https://flood-api.open-meteo.com/v1/flood?${coordParams(points)}` +
-      `&daily=river_discharge&past_days=365&forecast_days=16`
+      `&daily=river_discharge&past_days=365&forecast_days=16`,
+      { ...NET_ROUTE, ttl: 3 * 3600e3 } // river data changes once a day
     ));
     const today = new Date().toISOString().slice(0, 10);
     return data.map((d) => {
@@ -716,7 +723,8 @@ async function planRoute(fromQ, toQ, departH) {
   loading("Calculating routes…");
   const r = await getJSON(
     `https://router.project-osrm.org/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}` +
-    `?overview=full&geometries=geojson&alternatives=3`
+    `?overview=full&geometries=geojson&alternatives=3`,
+    { ...NET_ROUTE, source: "router.project-osrm.org" }
   );
   if (r.code !== "Ok" || !r.routes?.length) throw new Error("No driving route found between these places.");
 
@@ -1003,6 +1011,7 @@ function saveToURL() {
 }
 
 async function runRoute() {
+  updateWhenHint();
   const btn = document.querySelector("#route-form .primary-btn");
   btn.disabled = true;
   btn.textContent = "Checking…";
@@ -1011,10 +1020,18 @@ async function runRoute() {
     saveToURL();
   } catch (err) {
     clearRoute();
-    const offline = err instanceof TypeError; // fetch network failure
-    $("route-result").innerHTML = `<div class="verdict" style="--c:${sevColor(3)}">
-      <div class="head">⚠ ${offline ? "Couldn't reach the route service" : esc(err.message)}</div>
-      <div>${offline ? "Check your internet connection and try again." : "Check the spelling, or try a nearby city name."}</div></div>`;
+    // A place that wasn't found needs a different answer from a service that is slow or down.
+    const notFound = err.kind === "notfound" && !(err instanceof FetchError);
+    const SERVICES = [
+      [/open-meteo/, "The weather service"], [/osrm/, "The routing service"],
+      [/photon|nominatim|Place search/, "Place search"], [/api-bdc/, "The place-name service"],
+    ];
+    const service = SERVICES.find(([re]) => re.test(err.source || ""))?.[1] || "A data service";
+    $("route-result").innerHTML = `<div class="verdict" style="--c:${sevColor(notFound ? 2 : 3)}">
+      <div class="head">${VERDICT_ICONS[2]}${notFound ? esc(err.message) : "Couldn't finish the route check"}</div>
+      <div>${notFound ? "Check the spelling, or pick a place from the suggestions."
+        : `${esc(err instanceof FetchError ? errorText(err, service) : err.message)}`}</div>
+      ${notFound ? "" : `<div class="h-actions"><button type="button" id="route-retry">Try again</button></div>`}</div>`;
   } finally {
     btn.disabled = false;
     btn.textContent = "Check route";
@@ -1092,6 +1109,7 @@ $("btn-swap").addEventListener("click", () => {
 
 $("route-result").addEventListener("click", (e) => {
   if (e.target.closest("#stat-alerts")) showTab("alerts");
+  if (e.target.closest("#route-retry")) runRoute();
 });
 
 $("btn-from-me").addEventListener("click", () => {

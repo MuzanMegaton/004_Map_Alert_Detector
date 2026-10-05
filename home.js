@@ -1,151 +1,235 @@
-/* Home page: an overview for one place (weather now, air quality, alerts nearby)
- * and the way into the three working modes: Route, Alerts and Weather map.
+/* Home page: the forecast for one place, laid out day by day and hour by hour,
+ * with sunrise, sunset, UV, air quality and the alerts nearby, plus the way
+ * into the three working modes: Route, Alerts and Weather map.
  * Uses globals from app.js, route.js and wind.js.
  */
 
 const HOME_KEY = "mad.home";
+const SAVED_KEY = "mad.locations";
 const HOME_DEFAULT = { lat: 13.7563, lon: 100.5018, name: "Bangkok", label: "Bangkok, Thailand" };
 const HOME_RADIUS_KM = 1000;
+const FORECAST_DAYS = 14;
 
-function homePlace() {
-  try { return JSON.parse(localStorage.getItem(HOME_KEY)) || HOME_DEFAULT; } catch { return HOME_DEFAULT; }
-}
+const readJSON = (key, fallback) => {
+  try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
+};
+const writeJSON = (key, value) => {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage unavailable */ }
+};
+const homePlace = () => readJSON(HOME_KEY, HOME_DEFAULT);
+const savedPlaces = () => readJSON(SAVED_KEY, []);
+const samePlace = (a, b) => Math.abs(a.lat - b.lat) < 0.01 && Math.abs(a.lon - b.lon) < 0.01;
+
 function setHomePlace(p) {
-  const place = { lat: p.lat, lon: p.lon, name: p.name, label: p.label && !p.label.startsWith("📍") ? p.label : p.name };
-  try { localStorage.setItem(HOME_KEY, JSON.stringify(place)); } catch { /* storage unavailable */ }
-  homeWx = null;
+  writeJSON(HOME_KEY, { lat: p.lat, lon: p.lon, name: p.name, label: p.label && !p.label.startsWith("📍") ? p.label : p.name });
+  home.day = 0;
+  home.hour = null;
   renderHome();
 }
 
-// The page frame is built once, so the search box keeps its suggestion list between updates.
+// ---------- Page frame (built once, so the search box keeps its suggestion list) ----------
 $("home").innerHTML = `
-  <div class="home-inner">
-    <header class="home-hero">
-      <svg class="hero-art" viewBox="0 0 420 300" fill="none" stroke="currentColor" aria-hidden="true">
-        <g class="contours" stroke-width="1">
-          <path d="M40 220c30-70 90-40 120-90s80-70 140-50 90 70 80 120-70 80-150 80-210-10-190-60z"/>
-          <path d="M78 214c24-50 72-30 98-70s64-54 110-40 70 52 62 90-56 60-118 60-168-6-152-40z"/>
-          <path d="M118 206c18-32 54-20 74-48s46-38 80-28 50 36 44 62-40 42-86 42-124-4-112-28z"/>
-          <path d="M160 198c12-18 34-12 48-28s30-24 52-18 32 22 28 38-26 26-56 26-80-2-72-18z"/>
-          <path d="M206 190c6-8 16-6 24-12s14-10 24-8 14 10 12 16-12 10-26 10-38 0-34-6z"/>
-        </g>
-        <path class="trail" d="M56 252c40-10 60-60 104-66s52 34 96 20 50-78 108-96" stroke-width="2" stroke-dasharray="1 9" stroke-linecap="round"/>
-        <circle class="node" cx="56" cy="252" r="5"/><circle class="node warn" cx="256" cy="206" r="5"/><circle class="node end" cx="364" cy="110" r="5"/>
-        <circle class="pulse" cx="256" cy="206" r="12"/>
-      </svg>
-      <p class="eyebrow" id="home-date"></p>
-      <h2>Know before you go.</h2>
-      <p class="lede">Live alerts, weather, air quality and flood risk, for where you are and where you're heading.</p>
-      <div class="home-search route-field">
-        <input id="home-search" type="search" placeholder="Check a place: city, landmark or address" aria-label="Check a place" autocomplete="off" />
+  <div class="fc-hero">
+    <div class="fc-wrap">
+      <div class="fc-search route-field">
+        <input id="home-search" type="search" placeholder="Enter a city, landmark or address" aria-label="Search for a place" autocomplete="off" />
       </div>
-    </header>
-
-    <div class="home-grid">
-      <section class="h-card" id="home-now" aria-live="polite"></section>
-      <section class="h-card" id="home-alerts" aria-live="polite"></section>
+      <div class="fc-title">
+        <h2 id="home-place"></h2>
+        <button type="button" id="home-save" class="fc-save"></button>
+        <button type="button" id="home-me" class="fc-save">Use my location</button>
+      </div>
+      <div class="fc-saved" id="home-saved"></div>
     </div>
+  </div>
 
-    <h3 class="sub-h">What do you want to do?</h3>
-    <div class="home-modes">
-      <button type="button" data-go="route">
-        <svg class="m-ic" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M8 17c5-1 2-9 8-10"/></svg>
-        <b>Check a route</b>
-        <span>Compare routes and departure times for storms, floods, wind and air quality.</span>
-        <i>Route <span class="arr">→</span></i>
-      </button>
-      <button type="button" data-go="alerts">
-        <svg class="m-ic" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5 2.8 19.5h18.4L12 3.5z"/><path d="M12 10v4.2M12 16.8v.2"/></svg>
-        <b>Browse alerts</b>
-        <span>Earthquakes, cyclones, floods, volcanoes and wildfires, worldwide and live.</span>
-        <i>Alerts <span class="arr">→</span></i>
-      </button>
-      <button type="button" data-go="map">
-        <svg class="m-ic" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17a4 4 0 0 1-.6-7.96A5.5 5.5 0 0 1 17 9.5a3.75 3.75 0 0 1 .5 7.47"/><path d="M9 20l1-2M13 20l1-2M17 20l1-2"/></svg>
-        <b>Explore the weather map</b>
-        <span>Moving rain radar and wind direction. Tap anywhere for the local forecast.</span>
-        <i>Weather map <span class="arr">→</span></i>
-      </button>
+  <div class="fc-wrap">
+    <section aria-label="Day by day forecast">
+      <div class="fc-days-wrap">
+        <button type="button" class="fc-nav" data-scroll="days:-1" aria-label="Earlier days">‹</button>
+        <div class="fc-days" id="home-days" role="tablist"></div>
+        <button type="button" class="fc-nav" data-scroll="days:1" aria-label="Later days">›</button>
+      </div>
+    </section>
+
+    <section class="fc-panel" aria-label="Hour by hour forecast">
+      <div class="fc-hours-wrap">
+        <button type="button" class="fc-nav" data-scroll="hours:-1" aria-label="Earlier hours">‹</button>
+        <div class="fc-hours" id="home-hours"></div>
+        <button type="button" class="fc-nav" data-scroll="hours:1" aria-label="Later hours">›</button>
+      </div>
+      <div class="fc-detail" id="home-detail" aria-live="polite"></div>
+      <div class="fc-env" id="home-env"></div>
+      <p class="fc-updated" id="home-updated"></p>
+    </section>
+
+    <div class="fc-grid">
+      <section class="fc-card" id="home-alerts" aria-live="polite"></section>
+      <section class="fc-card">
+        <h3 class="fc-h">More for this place</h3>
+        <div class="fc-links">
+          <button type="button" data-home="map"><b>Weather map</b><span>Rain radar and wind around here</span></button>
+          <button type="button" data-home="route"><b>Route to here</b><span>Check storms, floods and air on the way</span></button>
+          <button type="button" data-go="alerts"><b>All alerts</b><span>Earthquakes, cyclones, floods, fires worldwide</span></button>
+        </div>
+      </section>
     </div>
-
-    <div id="home-recent"></div>
-    <p class="home-foot">Data: USGS, GDACS, NASA EONET, Open-Meteo, RainViewer, OpenStreetMap. A guide only; follow official warnings.</p>
+    <p class="home-foot">Forecast: Open-Meteo. Alerts: USGS, GDACS, NASA EONET. A guide only; follow official warnings.</p>
   </div>`;
 
-let homeWx = null; // { key, at, w, air }
+// ---------- Data ----------
+const home = { key: "", at: 0, fc: null, air: null, day: 0, hour: null };
 
-async function loadHomeWeather(place) {
+async function loadForecast(place) {
   const key = `${place.lat.toFixed(3)},${place.lon.toFixed(3)}`;
-  if (homeWx?.key === key && Date.now() - homeWx.at < 10 * 60 * 1000) return homeWx;
-  const [[w], air] = await Promise.all([weatherFor([place], 24), airFor([place], 24)]);
-  homeWx = { key, at: Date.now(), w, air: air?.[0]?.current || null };
-  return homeWx;
+  if (home.key === key && home.fc && Date.now() - home.at < 10 * 60 * 1000) return;
+  const [fc, air] = await Promise.all([
+    getJSON(
+      `https://api.open-meteo.com/v1/forecast?latitude=${place.lat.toFixed(4)}&longitude=${place.lon.toFixed(4)}` +
+      `&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,is_day,wind_speed_10m,wind_direction_10m` +
+      `&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,is_day,precipitation_probability,precipitation,` +
+      `wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index,visibility` +
+      `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset,uv_index_max,wind_speed_10m_max` +
+      `&forecast_days=${FORECAST_DAYS}&timezone=auto&timeformat=unixtime`,
+      { timeout: 12000, ttl: 10 * 60 * 1000, staleIfError: true, source: "Weather" }
+    ),
+    airFor([place], 24),
+  ]);
+  Object.assign(home, { key, at: Date.now(), fc, air: air?.[0]?.current || null });
 }
 
-function homeNowHTML(place, wx) {
-  const c = wx.w.current;
-  const [label, emoji] = wmo(c.weather_code);
-  const [aqLabel, aqColor] = aqiInfo(wx.air?.us_aqi);
-  const hz = hazardsOf({ ...c, visibility: null, us_aqi: wx.air?.us_aqi });
-  const hours = wx.w.hourly.time
-    .map((t, i) => i)
-    .filter((i) => i > 0 && i % 3 === 0)
-    .slice(0, 6)
-    .map((i) => `
-      <li><span>${new Date(wx.w.hourly.time[i] * 1000).toLocaleTimeString([], { hour: "numeric" })}</span>
-        <span class="e" title="${esc(wmo(wx.w.hourly.weather_code[i])[0])}">${wmo(wx.w.hourly.weather_code[i])[1]}</span>
-        <b>${Math.round(wx.w.hourly.temperature_2m[i])}°</b>
-        <span class="muted">${wx.w.hourly.precipitation_probability[i] ?? "–"}%</span></li>`)
-    .join("");
-  return `
-    <div class="h-head"><span class="eyebrow">Now in</span>
-      <button type="button" class="link" id="home-me">Use my location</button></div>
-    <h3 class="h-place">${esc(place.name)}</h3>
-    <div class="now">
-      <span class="now-emoji" aria-hidden="true">${emoji}</span>
-      <span class="now-temp">${Math.round(c.temperature_2m)}°</span>
-      <span class="now-text"><b>${label}</b><br><span class="muted">Feels ${Math.round(c.apparent_temperature)}° · Humidity ${c.relative_humidity_2m}%</span></span>
-    </div>
-    <dl class="facts">
-      <div><dt>Wind</dt><dd>${windHTML(c)}</dd></div>
-      <div><dt>Air quality</dt><dd>${wx.air ? `<b style="color:${aqColor}">AQI ${wx.air.us_aqi}</b> ${aqLabel}` : "Not available"}</dd></div>
-      ${driftHTML(c) ? `<div><dt>Weather</dt><dd>${driftHTML(c).replace("Weather moving toward", "Moving toward")}</dd></div>` : ""}
-    </dl>
-    ${hz.length ? `<p class="h-warn">${esc(hz.map((x) => x.t).join(" · "))}</p>` : ""}
-    ${tempTrendSVG(wx.w.hourly.temperature_2m)}
-    <ul class="hours">${hours}</ul>
-    <div class="h-actions">
-      <button type="button" data-home="map">Open on map</button>
-      <button type="button" data-home="route">Route to here</button>
-    </div>`;
+// ---------- Formatting (times are shown in the place's own time zone) ----------
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const localDate = (sec) => new Date((sec + home.fc.utc_offset_seconds) * 1000); // read with getUTC*()
+const hhmm = (sec) => { const d = localDate(sec); return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`; };
+const windWord = (v) => (v < 12 ? "light winds" : v < 20 ? "a gentle breeze" : v < 30 ? "a moderate breeze" : v < 40 ? "a fresh breeze" : v < 62 ? "strong winds" : "gale-force winds");
+const uvWord = (u) => (u == null ? "–" : u < 3 ? "Low" : u < 6 ? "Moderate" : u < 8 ? "High" : u < 11 ? "Very high" : "Extreme");
+const uvColor = (u) => (u < 3 ? "var(--sev-0)" : u < 6 ? "var(--sev-1)" : u < 8 ? "var(--sev-2)" : "var(--sev-3)");
+// Weather icon; clear and partly cloudy skies get a moon at night.
+const wxIcon = (code, isDay) => (!isDay && code <= 1 ? "🌙" : !isDay && code === 2 ? "☁️" : wmo(code)[1]);
+// Temperature colour: cold blue through warm yellow to hot red.
+function tempStyle(t) {
+  const hue = t <= 0 ? 210 : t <= 12 ? 210 - (t / 12) * 40 : t <= 22 ? 170 - ((t - 12) / 10) * 120 : t <= 34 ? 50 - ((t - 22) / 12) * 38 : Math.max(0, 12 - (t - 34) * 2);
+  return `background:hsl(${hue.toFixed(0)} 85% ${t > 12 && t < 26 ? 62 : 58}%);color:#1a1a1a`;
 }
 
-// Temperature over the next 24 hours as a small line, with the high and low marked.
-function tempTrendSVG(temps) {
-  const t = (temps || []).filter((v) => v != null);
-  if (t.length < 4) return "";
-  const W = 320, H = 46, pad = 6;
-  const lo = Math.min(...t), hi = Math.max(...t), span = hi - lo || 1;
-  const x = (i) => (i * W) / (t.length - 1);
-  const y = (v) => pad + (H - 2 * pad) * (1 - (v - lo) / span);
-  const line = t.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(" ");
-  const iHi = t.indexOf(hi), iLo = t.indexOf(lo);
-  return `
-    <figure class="trend" aria-label="Temperature over the next 24 hours: high ${Math.round(hi)}°, low ${Math.round(lo)}°">
-      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
-        <path class="area" d="${line} L${W} ${H} L0 ${H} Z"/>
-        <path class="line" d="${line}"/>
-        <circle cx="${x(iHi).toFixed(1)}" cy="${y(hi).toFixed(1)}" r="2.5"/>
-        <circle cx="${x(iLo).toFixed(1)}" cy="${y(lo).toFixed(1)}" r="2.5"/>
-      </svg>
-      <figcaption><span>Next 24 hours</span><span>High <b>${Math.round(hi)}°</b> · Low <b>${Math.round(lo)}°</b></span></figcaption>
-    </figure>`;
+// ---------- Rendering ----------
+function renderDays() {
+  const d = home.fc.daily, c = home.fc.current;
+  const night = !c.is_day;
+  $("home-days").innerHTML = d.time.map((t, i) => {
+    const date = localDate(t);
+    const icon = i === 0 ? wxIcon(c.weather_code, c.is_day) : wmo(d.weather_code[i])[1];
+    const hi = Math.round(d.temperature_2m_max[i]), lo = Math.round(d.temperature_2m_min[i]);
+    if (i === 0) {
+      return `
+      <button type="button" role="tab" class="fc-day today ${home.day === 0 ? "selected" : ""}" data-day="0" aria-selected="${home.day === 0}">
+        <span class="d-name">${night ? "Tonight" : "Today"}</span>
+        <span class="d-main">
+          <span class="d-icon" aria-hidden="true">${icon}</span>
+          <span class="d-now"><b>${Math.round(c.temperature_2m)}°</b><small>now</small></span>
+          <span class="d-temps">${night ? "" : `<i class="t-chip" style="${tempStyle(hi)}">${hi}°</i>`}<i class="t-chip low">${lo}°</i></span>
+          <span class="d-text">${wmo(c.weather_code)[0]} and ${windWord(c.wind_speed_10m)}</span>
+        </span>
+      </button>`;
+    }
+    return `
+      <button type="button" role="tab" class="fc-day ${home.day === i ? "selected" : ""}" data-day="${i}" aria-selected="${home.day === i}"
+        title="${esc(wmo(d.weather_code[i])[0])}, rain chance ${d.precipitation_probability_max[i] ?? "–"}%">
+        <span class="d-name">${DAY_NAMES[date.getUTCDay()]} <b>${date.getUTCDate()}</b></span>
+        <span class="d-icon" aria-hidden="true">${icon}</span>
+        <span class="d-temps"><i class="t-chip" style="${tempStyle(hi)}">${hi}°</i><i class="t-chip low">${lo}°</i></span>
+      </button>`;
+  }).join("");
 }
 
-const SKELETON = `<div class="skel" style="width:40%"></div><div class="skel big"></div><div class="skel"></div><div class="skel" style="width:70%"></div>`;
+// Indices of the hourly rows that belong to the selected day (today starts at the current hour).
+function hoursOfDay(day) {
+  const h = home.fc.hourly, d = home.fc.daily;
+  const start = d.time[day], end = start + 86400;
+  const from = day === 0 ? Math.floor(Date.now() / 3600e3) * 3600 : start;
+  const idx = h.time.map((t, i) => i).filter((i) => h.time[i] >= from && h.time[i] < end);
+  // Late in the evening, carry on into the next morning so the row is never nearly empty.
+  if (day === 0 && idx.length < 12) {
+    for (let i = (idx.at(-1) ?? h.time.findIndex((t) => t >= from) - 1) + 1; i < h.time.length && idx.length < 12; i++) idx.push(i);
+  }
+  return idx;
+}
+
+function renderHours() {
+  const h = home.fc.hourly;
+  const idx = hoursOfDay(home.day);
+  if (home.hour == null || !idx.includes(home.hour)) home.hour = idx[0] ?? null;
+  let lastDay = null;
+  $("home-hours").innerHTML = idx.map((i) => {
+    const date = localDate(h.time[i]);
+    const newDay = lastDay != null && date.getUTCDate() !== lastDay;
+    lastDay = date.getUTCDate();
+    const pp = h.precipitation_probability[i];
+    return `
+      <button type="button" class="fc-hour ${i === home.hour ? "selected" : ""}" data-hour="${i}" aria-pressed="${i === home.hour}">
+        <span class="h-time">${String(date.getUTCHours()).padStart(2, "0")}<small>00</small>${newDay ? `<em>${DAY_NAMES[date.getUTCDay()]}</em>` : ""}</span>
+        <span class="h-icon" aria-hidden="true">${wxIcon(h.weather_code[i], h.is_day[i])}</span>
+        <span class="t-chip" style="${tempStyle(h.temperature_2m[i])}">${Math.round(h.temperature_2m[i])}°</span>
+        <span class="h-rain ${pp >= 50 ? "wet" : ""}"><i class="drop" aria-hidden="true"></i>${pp ?? "–"}%</span>
+        <span class="h-wind" title="Wind from ${compass(h.wind_direction_10m[i])}">
+          <i class="w-ring">${Math.round(h.wind_speed_10m[i])}</i>${windArrow(h.wind_direction_10m[i], 12)}
+        </span>
+      </button>`;
+  }).join("");
+  renderHourDetail();
+}
+
+function renderHourDetail() {
+  const h = home.fc.hourly, i = home.hour;
+  if (i == null) return ($("home-detail").innerHTML = "");
+  const date = localDate(h.time[i]);
+  const vis = h.visibility[i];
+  $("home-detail").innerHTML = `
+    <div class="fd-head"><b>${DAY_NAMES[date.getUTCDay()]} ${hhmm(h.time[i])}</b>
+      <span>${wmo(h.weather_code[i])[0]} and ${windWord(h.wind_speed_10m[i])}</span></div>
+    <dl class="fd-grid">
+      <div><dt>Feels like</dt><dd>${Math.round(h.apparent_temperature[i])}°</dd></div>
+      <div><dt>Chance of rain</dt><dd>${h.precipitation_probability[i] ?? "–"}%</dd></div>
+      <div><dt>Rain</dt><dd>${h.precipitation[i]} mm</dd></div>
+      <div><dt>Humidity</dt><dd>${h.relative_humidity_2m[i]}%</dd></div>
+      <div><dt>Wind</dt><dd>${Math.round(h.wind_speed_10m[i])} km/h from ${compass(h.wind_direction_10m[i])}</dd></div>
+      <div><dt>Gusts</dt><dd>${Math.round(h.wind_gusts_10m[i])} km/h</dd></div>
+      <div><dt>Visibility</dt><dd>${vis == null ? "–" : vis >= 10000 ? "Good" : vis >= 4000 ? "Moderate" : vis >= 1000 ? "Poor" : "Very poor"}</dd></div>
+      <div><dt>UV</dt><dd>${h.uv_index[i] == null ? "–" : `${Math.round(h.uv_index[i])} ${uvWord(h.uv_index[i])}`}</dd></div>
+    </dl>`;
+}
+
+function renderEnv(place) {
+  const d = home.fc.daily, i = home.day;
+  const uv = d.uv_index_max[i];
+  const [aqLabel, aqColor] = aqiInfo(home.air?.us_aqi);
+  $("home-env").innerHTML = `
+    <div><span class="env-ic" aria-hidden="true">🌅</span><span>Sunrise<b>${hhmm(d.sunrise[i])}</b></span></div>
+    <div><span class="env-ic" aria-hidden="true">🌇</span><span>Sunset<b>${hhmm(d.sunset[i])}</b></span></div>
+    <div><span class="env-badge" style="background:${uvColor(uv)}">UV</span><span>${uvWord(uv)}<b>${uv == null ? "–" : Math.round(uv)}</b></span></div>
+    <div><span class="env-badge" style="background:${aqColor}">AQI</span><span>${home.air ? esc(aqLabel) : "Not available"}<b>${home.air ? home.air.us_aqi : "–"}</b></span></div>
+    <div><span class="env-ic" aria-hidden="true">💧</span><span>Rain chance<b>${d.precipitation_probability_max[i] ?? "–"}%</b></span></div>
+    <div><span class="env-ic" aria-hidden="true">💨</span><span>Max wind<b>${Math.round(d.wind_speed_10m_max[i])} km/h</b></span></div>`;
+  $("home-updated").textContent =
+    `Last updated ${new Date(home.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}. ` +
+    `All times are local to ${place.name} (${home.fc.timezone_abbreviation}).`;
+}
+
+function renderHeader(place) {
+  $("home-place").textContent = place.name;
+  const saved = savedPlaces();
+  const isSaved = saved.some((s) => samePlace(s, place));
+  $("home-save").textContent = isSaved ? "✓ Saved" : "+ Add to your locations";
+  $("home-save").classList.toggle("on", isSaved);
+  $("home-saved").innerHTML = saved.length
+    ? `<span>Your locations</span>` + saved.map((s, i) =>
+        `<button type="button" data-saved="${i}" class="${samePlace(s, place) ? "on" : ""}">${esc(s.name)}</button>`).join("")
+    : "";
+}
 
 function homeAlertsHTML(place) {
-  if (state.firstLoad) return `<span class="eyebrow">Alerts</span>${SKELETON}`;
+  if (state.firstLoad) return `<h3 class="fc-h">Alerts nearby</h3><div class="skel"></div><div class="skel" style="width:70%"></div>`;
   const count = (s) => state.alerts.filter((a) => a.severity === s).length;
   const near = state.alerts
     .map((a) => ({ a, d: distanceKm(place, a) }))
@@ -158,52 +242,51 @@ function homeAlertsHTML(place) {
     : worst === 2 ? "Significant alert nearby"
     : `${near.length} alert${near.length > 1 ? "s" : ""} nearby`;
   return `
-    <div class="h-head"><span class="eyebrow">Alerts within ${HOME_RADIUS_KM.toLocaleString()} km of ${esc(place.name)}</span></div>
-    <h3 class="h-place" style="${worst >= 2 ? `color:${sevColor(worst)}` : ""}">${headline}</h3>
+    <h3 class="fc-h">Alerts within ${HOME_RADIUS_KM.toLocaleString()} km</h3>
+    <p class="fc-big" style="${worst >= 2 ? `color:${sevColor(worst)}` : ""}">${headline}</p>
     ${near.length ? `<ul class="h-alerts">${near.slice(0, 4).map(({ a, d }) => `
       <li><button type="button" data-alert="${esc(a.id)}">
         <i class="dot sev-${a.severity === -1 ? "info" : a.severity}"></i>
-        <span><b>${esc(a.title)}</b><br><span class="muted">${Math.round(d).toLocaleString()} km away · ${timeAgo(a.time)}</span></span>
+        <span><b>${esc(a.title)}</b><br><span class="muted">${SEVERITY_NAMES[a.severity]} · ${Math.round(d).toLocaleString()} km away · ${timeAgo(a.time)}</span></span>
       </button></li>`).join("")}</ul>`
       : `<p class="muted">No earthquakes, storms, floods or fires are reported in this area right now.</p>`}
-    <div class="world">
-      <span class="eyebrow">Worldwide now</span>
-      <div class="world-row">
-        <span><b style="color:${sevColor(3)}">${count(3)}</b> Red</span>
-        <span><b style="color:${sevColor(2)}">${count(2)}</b> Orange</span>
-        <span><b>${count(1)}</b> Yellow</span>
-        <span><b>${state.alerts.length}</b> total</span>
-      </div>
-    </div>
-    <div class="h-actions"><button type="button" data-go="alerts">See all alerts</button></div>`;
+    <div class="world-row">
+      <span><b style="color:${sevColor(3)}">${count(3)}</b> Red</span>
+      <span><b style="color:${sevColor(2)}">${count(2)}</b> Orange</span>
+      <span><b>${count(1)}</b> Yellow</span>
+      <span><b>${state.alerts.length}</b> worldwide</span>
+    </div>`;
 }
 
 let homeSeq = 0;
 async function renderHome() {
   const place = homePlace();
   const my = ++homeSeq;
-  $("home-date").textContent = new Date().toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" });
+  renderHeader(place);
   $("home-alerts").innerHTML = homeAlertsHTML(place);
-  const recent = recentPlaces().slice(0, 6);
-  $("home-recent").innerHTML = recent.length
-    ? `<h3 class="sub-h">Recent places</h3><div class="examples">${recent.map((r, i) => `<a data-recent="${i}">${esc(r.name)}</a>`).join("")}</div>`
-    : "";
-  if (!homeWx || homeWx.key !== `${place.lat.toFixed(3)},${place.lon.toFixed(3)}`) {
-    $("home-now").innerHTML = `<span class="eyebrow">Now in</span><h3 class="h-place">${esc(place.name)}</h3>${SKELETON}`;
+  const key = `${place.lat.toFixed(3)},${place.lon.toFixed(3)}`;
+  if (home.key !== key || !home.fc) {
+    $("home-days").innerHTML = Array.from({ length: 8 }, (_, i) => `<div class="fc-day ${i ? "" : "today"} loading"><div class="skel"></div><div class="skel big"></div></div>`).join("");
+    $("home-hours").innerHTML = Array.from({ length: 10 }, () => `<div class="fc-hour loading"><div class="skel"></div><div class="skel big"></div></div>`).join("");
+    $("home-detail").innerHTML = $("home-env").innerHTML = "";
+    $("home-updated").textContent = "";
   }
   try {
-    const wx = await loadHomeWeather(place);
-    if (my === homeSeq) $("home-now").innerHTML = homeNowHTML(place, wx);
+    await loadForecast(place);
+    if (my !== homeSeq) return;
+    renderDays();
+    renderHours();
+    renderEnv(place);
   } catch (err) {
-    if (my === homeSeq) {
-      $("home-now").innerHTML = `<span class="eyebrow">Now in</span><h3 class="h-place">${esc(place.name)}</h3>
-        <p class="error">${esc(errorText(err, "Weather"))}</p>
-        <div class="h-actions"><button type="button" data-home="retry">Try again</button></div>`;
-    }
+    if (my !== homeSeq) return;
+    $("home-days").innerHTML = "";
+    $("home-hours").innerHTML = `<p class="fc-error">${esc(errorText(err, "Weather"))}
+      <button type="button" data-home="retry">Try again</button></p>`;
   }
 }
 window.renderHome = renderHome;
 
+// ---------- Interaction ----------
 setupSuggest($("home-search"), {
   myLocation: true,
   enterPicksFirst: true,
@@ -222,7 +305,7 @@ setupSuggest($("home-search"), {
       $("home-search").value = "";
       setHomePlace(place);
     } catch (err) {
-      $("home-now").innerHTML = `<p class="error">${esc(err.kind === "notfound" ? err.message : errorText(err, "Place search"))}</p>`;
+      $("home-hours").innerHTML = `<p class="fc-error">${esc(err.kind === "notfound" ? err.message : errorText(err, "Place search"))}</p>`;
     }
   },
 });
@@ -231,15 +314,51 @@ $("home").addEventListener("click", (e) => {
   const place = homePlace();
   const go = e.target.closest("[data-go]");
   if (go) return setMode(go.dataset.go);
+
+  const dayBtn = e.target.closest("[data-day]");
+  if (dayBtn) {
+    home.day = +dayBtn.dataset.day;
+    home.hour = null;
+    renderDays();
+    renderHours();
+    renderEnv(place);
+    $("home-hours").scrollLeft = 0;
+    return;
+  }
+  const hourBtn = e.target.closest("[data-hour]");
+  if (hourBtn) {
+    home.hour = +hourBtn.dataset.hour;
+    document.querySelectorAll(".fc-hour").forEach((b) => {
+      b.classList.toggle("selected", b === hourBtn);
+      b.setAttribute("aria-pressed", b === hourBtn);
+    });
+    return renderHourDetail();
+  }
+  const scroll = e.target.closest("[data-scroll]");
+  if (scroll) {
+    const [which, dir] = scroll.dataset.scroll.split(":");
+    const el = $(which === "days" ? "home-days" : "home-hours");
+    return el.scrollBy({ left: +dir * el.clientWidth * 0.8, behavior: "smooth" });
+  }
+
+  if (e.target.closest("#home-save")) {
+    const saved = savedPlaces();
+    const i = saved.findIndex((s) => samePlace(s, place));
+    if (i >= 0) saved.splice(i, 1);
+    else saved.unshift(place);
+    writeJSON(SAVED_KEY, saved.slice(0, 8));
+    return renderHeader(place);
+  }
+  const savedBtn = e.target.closest("[data-saved]");
+  if (savedBtn) return setHomePlace(savedPlaces()[+savedBtn.dataset.saved]);
+  if (e.target.closest("#home-me")) {
+    return useMyLocation(async (p) => setHomePlace({ ...p, name: (await reverseName(p.lat, p.lon)) || "My location" }));
+  }
+
   const alertBtn = e.target.closest("[data-alert]");
   if (alertBtn) {
     setMode("alerts");
     return setTimeout(() => select(alertBtn.dataset.alert), 60); // after the map has its new size
-  }
-  const rec = e.target.closest("[data-recent]");
-  if (rec) return setHomePlace(recentPlaces()[+rec.dataset.recent]);
-  if (e.target.closest("#home-me")) {
-    return useMyLocation(async (p) => setHomePlace({ ...p, name: (await reverseName(p.lat, p.lon)) || "My location" }));
   }
   const act = e.target.closest("[data-home]")?.dataset.home;
   if (act === "retry") return renderHome();

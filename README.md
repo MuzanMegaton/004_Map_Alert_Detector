@@ -28,10 +28,13 @@ They're fine for personal use and sharing with friends. For heavy public traffic
 
 ## Features
 
-**Home**
-- An overview for one place: the weather now, the next hours, wind, air quality, and alerts within 1,000 km.
-- Search any place to check it, or use your location. The place is remembered on your device.
-- Shortcuts into the three modes: Route, Alerts and Weather map. On phones the modes are a bar at the bottom.
+**Home** (the forecast for one place)
+- Search any place, or use your location. **Add to your locations** keeps a list of saved places on your device.
+- **Day by day**: 14 days with icon, high and low. Select a day to see it in detail.
+- **Hour by hour** for the selected day: weather, colour-coded temperature, chance of rain and wind. Select an hour for feels-like, rain, humidity, gusts, visibility and UV.
+- Sunrise, sunset, UV, air quality, rain chance and max wind for the day. Times are shown in the place's own time zone.
+- Alerts within 1,000 km, and shortcuts to the Weather map, a route to the place, and all alerts.
+- On phones the modes (Home, Route, Alerts, Weather map) are a bar at the bottom.
 
 **Route check** (the Route mode)
 - Search places by name as you type, in English or Thai: cities, districts, landmarks, malls, hotels. Suggestions show the place type, your recent places and **Use my location**. Use the arrow keys or click to pick one. You can also type `lat,lon` or tap an example route.
