@@ -588,6 +588,15 @@ function hazardsOf(h, flood, heading) {
   return list;
 }
 
+// Status icon in front of the route verdict: check, info, warning, stop.
+const vIcon = (d) => `<svg class="v-ic" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/>${d}</svg>`;
+const VERDICT_ICONS = [
+  vIcon(`<path d="M7.5 12.5l3 3 6-6.5"/>`),
+  vIcon(`<path d="M12 11v5M12 7.6v.2"/>`),
+  vIcon(`<path d="M12 7v6M12 16.2v.2"/>`),
+  vIcon(`<path d="M8 8l8 8M16 8l-8 8"/>`),
+];
+
 const riskLabel = (score) =>
   score < 5 ? ["Low", sevColor(0)] : score < 20 ? ["Medium", sevColor(1)] : score < 50 ? ["High", sevColor(2)] : ["Very high", sevColor(3)];
 
@@ -863,7 +872,7 @@ function renderRouteResult() {
   const nearKm = Number($("near-route-km").value);
   $("route-result").innerHTML = `
     <div class="verdict" style="--c:${sevColor(level)}">
-      <div class="head">${head}</div>
+      <div class="head">${VERDICT_ICONS[level]}${head}</div>
       <div>${text}</div>
       ${tips.length ? `<ul>${tips.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>` : ""}
     </div>
@@ -871,8 +880,8 @@ function renderRouteResult() {
       <div class="stat">Distance<b>${Math.round(alt.km).toLocaleString()} km</b></div>
       <div class="stat">Drive<b>${Math.floor(alt.hours)}h ${Math.round((alt.hours % 1) * 60)}m</b></div>
       <div class="stat">Risk<b style="color:${riskColor}">${risk}</b></div>
-      <div class="stat link" id="stat-alerts" title="Show these alerts">Alerts ≤${nearKm} km<b>${ev.alerts.length}</b></div>
-      <div class="stat">Warnings<b>${ev.warnings}</b></div>
+      <div class="stat link" id="stat-alerts" title="Alerts within ${nearKm} km of the route. Click to see them.">Alerts<b>${ev.alerts.length}</b></div>
+      <div class="stat" title="Checkpoints with a weather, air or river warning">Warnings<b>${ev.warnings}</b></div>
     </div>
     <div class="share-row"><button type="button" id="btn-share">Share this route</button></div>
 

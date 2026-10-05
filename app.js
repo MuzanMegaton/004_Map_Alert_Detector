@@ -356,11 +356,11 @@ function render() {
     .slice(0, 500)
     .map(
       (a) => `
-      <li data-id="${esc(a.id)}" class="${a.id === state.selectedId ? "selected" : ""}">
+      <li data-id="${esc(a.id)}" class="${a.id === state.selectedId ? "selected" : ""}" style="--bar:${sevColor(a.severity)}">
         <div class="icon" style="background:${sevColor(a.severity)}">${iconFor(a)}</div>
         <div>
           <div class="title">${esc(a.title)}</div>
-          <div class="meta">${esc(a.source)} · ${timeAgo(a.time)}${
+          <div class="meta"><b style="color:${sevColor(a.severity)}">${SEVERITY_NAMES[a.severity]}</b> · ${esc(a.source)} · ${timeAgo(a.time)}${
             a.distance != null ? ` · ${Math.round(a.distance).toLocaleString()} km away` : ""
           }${a.routeDist != null && state.route ? ` · ${Math.round(a.routeDist)} km from route` : ""
           }${a.place && !a.title.includes(a.place) ? ` · ${esc(a.place)}` : ""}</div>
