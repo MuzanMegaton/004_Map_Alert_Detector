@@ -500,6 +500,9 @@ $("btn-notify").addEventListener("click", async () => {
   if (!state.notify) {
     const perm = await Notification.requestPermission();
     state.notify = perm === "granted";
+    $("status-text").textContent = state.notify
+      ? "Notifications on: new Orange and Red alerts while this page is open"
+      : "Notifications are blocked. Allow them for this site in your browser settings.";
   } else {
     state.notify = false;
   }

@@ -213,7 +213,8 @@ $("home").addEventListener("click", (e) => {
   if (act === "route") {
     setRoutePlace("route-to", { ...place, where: "", icon: "📍", kind: "" });
     setMode("route");
-    $("route-from").focus();
+    if ($("route-from").value.trim()) runRoute();
+    else $("route-from").focus();
   }
 });
 

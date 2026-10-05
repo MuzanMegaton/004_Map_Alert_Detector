@@ -133,16 +133,14 @@ function rankPlaces(items, q) {
     return (n === nq ? 6 : n.startsWith(nq) ? 4 : n.split(/\s+/).some((w) => w.startsWith(nq)) ? 2.5 : n.includes(nq) ? 1.5 : 0) +
       (p.rank || 0) + (typeScore[p.kind] || 1) + (d(p) < 50 ? 1.5 : d(p) < 300 ? 1 : d(p) < 1500 ? 0.5 : 0);
   };
-  const seen = new Set();
-  return items
-    .map((p) => ({ p, s: score(p) }))
-    .sort((a, b) => b.s - a.s)
-    .map((x) => x.p)
-    .filter((p) => {
-      // The same town from two services counts once (same name within about 10 km).
-      const k = `${norm(p.name)}|${p.lat.toFixed(1)},${p.lon.toFixed(1)}`;
-      return !seen.has(k) && seen.add(k);
-    });
+  // The same town from two services counts once: same name (ignoring "City" and the like) within 30 km.
+  const base = (p) => norm(p.name).replace(/\b(city|town|municipality|province|district)\b/g, "").replace(/\s+/g, " ").trim();
+  const kept = [];
+  for (const { p } of items.map((p) => ({ p, s: score(p) })).sort((a, b) => b.s - a.s)) {
+    if (!kept.some((k) => base(k) === base(p) && k.kind === p.kind && distanceKm(k, p) < 30) &&
+        !kept.some((k) => base(k) === base(p) && distanceKm(k, p) < 30 && /City|Town/.test(k.kind) && /City|Town/.test(p.kind))) kept.push(p);
+  }
+  return kept;
 }
 
 // Open-Meteo place search: cities, towns and airports. Fast, so its results are shown first.
@@ -203,7 +201,17 @@ async function geocode(q) {
   if (picked.has(q)) return picked.get(q);
   const m = q.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
   if (m) return { lat: +m[1], lon: +m[2], name: q, label: q };
-  const { items, error } = await searchPlaces(q, { limit: 5, full: true });
+  // A typed name that exactly matches a city or town is used at once, without waiting
+  // for the slower landmark search to finish.
+  const ctrl = new AbortController();
+  const quick = new Promise((resolve) => {
+    searchPlaces(q, {
+      limit: 5, full: true, signal: ctrl.signal,
+      onPartial(found) { if (norm(found[0].name) === norm(q)) resolve({ items: found }); },
+    }).then(resolve, (err) => resolve({ items: [], error: isAbort(err) ? null : err }));
+  });
+  const { items, error } = await quick;
+  ctrl.abort();
   if (items.length) return items[0];
   if (error) throw error;
   const e = new Error(`Place not found: "${q}"`);
@@ -370,8 +378,9 @@ function goToPlace(place) {
   rememberPlace(place);
   $("map-search").value = place.label;
   $("map-search").blur();
-  map.flyTo([place.lat, place.lon], Math.max(map.getZoom(), ["City", "Province", "Country"].includes(place.kind) ? 10 : 13), { duration: 0.8 });
-  showWeatherPopup(L.latLng(place.lat, place.lon), place);
+  // The popup opens after the map has arrived; opening it earlier would stop the move half-way.
+  map.once("moveend", () => showWeatherPopup(L.latLng(place.lat, place.lon), place));
+  map.setView([place.lat, place.lon], Math.max(map.getZoom(), ["City", "Province", "Country"].includes(place.kind) ? 10 : 13));
 }
 setupSuggest($("map-search"), {
   onChoose: goToPlace,
@@ -1020,7 +1029,16 @@ $("route-result").addEventListener("click", async (e) => {
       await navigator.clipboard.writeText(location.href);
       btn.textContent = "Link copied";
     } catch {
-      prompt("Copy this link:", location.href);
+      // Clipboard blocked: show the link, selected, so it can be copied by hand.
+      let box = $("share-link");
+      if (!box) {
+        btn.parentElement.insertAdjacentHTML("afterend", `<input id="share-link" class="share-link" readonly aria-label="Link to this route" />`);
+        box = $("share-link");
+      }
+      box.value = location.href;
+      box.focus();
+      box.select();
+      return;
     }
     setTimeout(() => (btn.textContent = "Share this route"), 2000);
   }
