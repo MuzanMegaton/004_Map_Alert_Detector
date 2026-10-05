@@ -124,12 +124,15 @@
 
     <div class="map-wrap">
       <div id="map"></div>
-      <div class="legend" title="Alert severity">
-        <span><i class="dot sev-3"></i>Red</span>
-        <span><i class="dot sev-2"></i>Orange</span>
-        <span><i class="dot sev-1"></i>Yellow</span>
-        <span><i class="dot sev-0"></i>Green</span>
-        <span><i class="dot sev-info"></i>Info</span>
+      <div class="legend" title="Alert severity: colour, shape and words">
+        <span><i class="lg sev-3"></i>Red <em>Take action</em></span>
+        <span><i class="lg sev-2"></i>Orange <em>Be prepared</em></span>
+        <span><i class="lg sev-1"></i>Yellow <em>Be aware</em></span>
+        <span><i class="lg sev-0"></i>Green <em>Low</em></span>
+        <span><i class="lg sev-info"></i>Info</span>
+      </div>
+      <div class="rain-legend hidden" id="rain-legend" aria-label="Rain radar scale">
+        <b>Rain</b><i class="rl"></i><span>Light</span><span>Moderate</span><span>Heavy</span><span>Extreme</span>
       </div>
       <div class="map-search route-field">
         <input id="map-search" type="search" placeholder="Search a place on the map" aria-label="Search a place on the map" autocomplete="off" />

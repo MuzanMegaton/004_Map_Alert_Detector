@@ -951,3 +951,92 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px s
   .fc-grid { grid-template-columns: 1fr; }
   .fc-env { gap: 14px 22px; }
 }
+
+/* =====================================================================
+   Research-backed gaps: uncertainty, rain wording, impact-first warnings,
+   meaning never by colour alone, 3:1 contrast on map symbols, touch targets.
+   ===================================================================== */
+
+/* Lower-confidence outlook (days 11-14) */
+.fc-day.outlook { background: repeating-linear-gradient(135deg, var(--panel), var(--panel) 6px, var(--panel-2) 6px, var(--panel-2) 12px); }
+.fc-day.outlook .d-icon, .fc-day.outlook .d-temps { opacity: .7; }
+.d-conf { font-size: 10px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+.d-rain { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+.d-text small { display: block; margin-top: 3px; font-size: 12px; color: var(--muted); }
+.fd-note { margin: 12px 0 0; padding: 8px 10px; border-left: 3px solid var(--sev-1); background: var(--panel); font-size: 13px; }
+
+/* Verdict and alert details: what to expect, what to do */
+.verdict h4, .d-h { font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 12px 0 2px; }
+.verdict h4 + ul { margin-top: 2px; color: var(--text); }
+.verdict li { margin: 3px 0; }
+.detail .d-h + p { margin: 2px 0 0; }
+.src-line { font-size: 11px; line-height: 1.5; color: var(--muted); margin: 12px 0 0; }
+.route-summary { grid-template-columns: repeat(4, 1fr); }
+
+/* Severity by shape as well as colour: ring (info), circle, square (orange), diamond (red) */
+.marker { box-shadow: 0 0 0 1.5px rgba(0, 0, 0, .65), 0 1px 4px rgba(0, 0, 0, .4); }
+.marker span { display: grid; place-items: center; }
+.marker.sev-2 { border-radius: 5px; }
+.marker.sev-3 { border-radius: 4px; transform: rotate(45deg); }
+.marker.sev-3 span { transform: rotate(-45deg); }
+.marker.sev-info { background: var(--panel); border: 4px solid var(--sev-info); }
+.lg { width: 11px; height: 11px; display: inline-block; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0, 0, 0, .5); }
+.lg.sev-2 { border-radius: 2px; }
+.lg.sev-3 { border-radius: 1px; transform: rotate(45deg); }
+.lg.sev-info { background: var(--panel); border: 3px solid var(--sev-info); }
+.legend { flex-wrap: wrap; max-width: calc(100% - 24px); gap: 6px 12px; }
+.legend em { font-style: normal; color: var(--muted); }
+
+/* Route numbers on the map */
+.route-tag {
+  width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 13px;
+  background: #fff; color: #1c1c1c; border: 3px dashed var(--c); box-shadow: 0 0 0 1.5px rgba(0, 0, 0, .55); cursor: pointer;
+}
+.route-tag.on { background: var(--c); color: #fff; border: 3px solid #fff; }
+
+/* Map symbols keep 3:1 contrast on any basemap: light halo plus dark edge */
+.wind-pin path { stroke: #fff; stroke-width: 2.5px; paint-order: stroke; stroke-linejoin: round; }
+.wind-pin { filter: drop-shadow(0 0 1px rgba(0, 0, 0, .9)); }
+.wx-marker { box-shadow: 0 0 0 1.5px rgba(255, 255, 255, .9), 0 1px 4px rgba(0, 0, 0, .45); }
+
+/* Rain radar scale, with words */
+.rain-legend {
+  position: absolute; right: 12px; bottom: 24px; z-index: 500; display: grid; grid-template-columns: auto repeat(4, 1fr);
+  gap: 2px 8px; align-items: center; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 6px 10px; font-size: 11px; box-shadow: var(--shadow); min-width: 240px;
+}
+.rain-legend b { grid-row: span 2; }
+.rain-legend .rl { grid-column: 2 / -1; height: 8px; border-radius: 2px; background: linear-gradient(90deg, #9be1ff, #3fa0ff, #2046d8, #f2e33b, #f29a1f, #e02f2f, #c020c8); }
+.rain-legend span { text-align: center; color: var(--muted); }
+
+/* Touch targets: 24 px is the floor everywhere, about 44 px for the main controls on phones */
+button, select, .chips label, .examples a, .fc-saved button { min-height: 28px; }
+.detail .close { min-width: 32px; min-height: 32px; }
+.fc-nav { width: 32px; }
+.link { min-height: 24px; }
+@media (max-width: 800px) {
+  .toolbar button, .fc-save, .fc-saved button, .layer-chips button, .route-field button, .route-actions button, #btn-depart-now,
+  .h-actions button, .popup-actions button, .examples a, .chips label, .filters select, .filters input,
+  .route-field input, .route-when input, .share-row button, .fc-links button { min-height: 44px; }
+  .examples a, .chips label { display: inline-flex; align-items: center; }
+  .detail .close { min-width: 44px; min-height: 44px; }
+  .leaflet-touch .leaflet-bar a { width: 40px; height: 40px; line-height: 40px; }
+  .leaflet-touch .leaflet-control-layers-toggle { width: 44px; height: 44px; }
+  .map-search { left: 62px; width: calc(100% - 130px); }
+  .rain-legend { left: 6px; right: auto; bottom: 86px; min-width: 0; width: 230px; }
+  .route-summary { grid-template-columns: repeat(4, 1fr); }
+  .legend em { display: none; }
+}
+
+/* Departure options: time on the left, level and warning count stacked on the right */
+.option.compact { grid-template-columns: minmax(0, 1fr) auto; row-gap: 2px; align-items: start; }
+.option.compact > :nth-child(1) { grid-row: 1 / span 2; }
+.option.compact > :nth-child(1) .sub { display: block; }
+.option.compact > :nth-child(2) { grid-column: 2; grid-row: 2; text-align: right; }
+.option.compact > :nth-child(3) { grid-column: 2; grid-row: 1; text-align: right; white-space: nowrap; }
+.chips label { white-space: nowrap; }
+.chips label { border-radius: var(--radius); }
+@media (max-width: 800px) {
+  .chips label { padding: 0 12px; min-height: 44px; }
+  .layer-chips { top: 60px; left: 62px; }
+}

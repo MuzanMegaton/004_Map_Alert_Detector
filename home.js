@@ -9,6 +9,8 @@ const SAVED_KEY = "mad.locations";
 const HOME_DEFAULT = { lat: 13.7563, lon: 100.5018, name: "Bangkok", label: "Bangkok, Thailand" };
 const HOME_RADIUS_KM = 1000;
 const FORECAST_DAYS = 14;
+// From this day on (day 11), the forecast is shown as a lower-confidence outlook.
+const OUTLOOK_FROM = 10;
 
 const readJSON = (key, fallback) => {
   try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
@@ -129,16 +131,18 @@ function renderDays() {
           <span class="d-icon" aria-hidden="true">${icon}</span>
           <span class="d-now"><b>${Math.round(c.temperature_2m)}°</b><small>now</small></span>
           <span class="d-temps">${night ? "" : `<i class="t-chip" style="${tempStyle(hi)}">${hi}°</i>`}<i class="t-chip low">${lo}°</i></span>
-          <span class="d-text">${wmo(c.weather_code)[0]} and ${windWord(c.wind_speed_10m)}</span>
+          <span class="d-text">${wmo(c.weather_code)[0]} and ${windWord(c.wind_speed_10m)}<small>${d.precipitation_probability_max[0] ?? "–"}% chance of rain today</small></span>
         </span>
       </button>`;
     }
     return `
-      <button type="button" role="tab" class="fc-day ${home.day === i ? "selected" : ""}" data-day="${i}" aria-selected="${home.day === i}"
+      <button type="button" role="tab" class="fc-day ${home.day === i ? "selected" : ""} ${i >= OUTLOOK_FROM ? "outlook" : ""}" data-day="${i}" aria-selected="${home.day === i}"
         title="${esc(wmo(d.weather_code[i])[0])}, rain chance ${d.precipitation_probability_max[i] ?? "–"}%">
         <span class="d-name">${DAY_NAMES[date.getUTCDay()]} <b>${date.getUTCDate()}</b></span>
         <span class="d-icon" aria-hidden="true">${icon}</span>
         <span class="d-temps"><i class="t-chip" style="${tempStyle(hi)}">${hi}°</i><i class="t-chip low">${lo}°</i></span>
+        <span class="d-rain" title="Chance of rain that day"><i class="drop" aria-hidden="true"></i>${d.precipitation_probability_max[i] ?? "–"}%</span>
+        ${i >= OUTLOOK_FROM ? `<span class="d-conf">less certain</span>` : ""}
       </button>`;
   }).join("");
 }
@@ -171,7 +175,7 @@ function renderHours() {
         <span class="h-time">${String(date.getUTCHours()).padStart(2, "0")}<small>00</small>${newDay ? `<em>${DAY_NAMES[date.getUTCDay()]}</em>` : ""}</span>
         <span class="h-icon" aria-hidden="true">${wxIcon(h.weather_code[i], h.is_day[i])}</span>
         <span class="t-chip" style="${tempStyle(h.temperature_2m[i])}">${Math.round(h.temperature_2m[i])}°</span>
-        <span class="h-rain ${pp >= 50 ? "wet" : ""}"><i class="drop" aria-hidden="true"></i>${pp ?? "–"}%</span>
+        <span class="h-rain ${pp >= 50 ? "wet" : ""}" title="${pp ?? "–"}% chance of any rain in this hour"><i class="drop" aria-hidden="true"></i>${pp ?? "–"}%</span>
         <span class="h-wind" title="Wind from ${compass(h.wind_direction_10m[i])}">
           <i class="w-ring">${Math.round(h.wind_speed_10m[i])}</i>${windArrow(h.wind_direction_10m[i], 12)}
         </span>
@@ -190,14 +194,16 @@ function renderHourDetail() {
       <span>${wmo(h.weather_code[i])[0]} and ${windWord(h.wind_speed_10m[i])}</span></div>
     <dl class="fd-grid">
       <div><dt>Feels like</dt><dd>${Math.round(h.apparent_temperature[i])}°</dd></div>
-      <div><dt>Chance of rain</dt><dd>${h.precipitation_probability[i] ?? "–"}%</dd></div>
-      <div><dt>Rain</dt><dd>${h.precipitation[i]} mm</dd></div>
+      <div><dt title="Chance of any rain in this hour">Chance of rain</dt><dd>${h.precipitation_probability[i] ?? "–"}%</dd></div>
+      <div><dt>Rain amount</dt><dd>${h.precipitation[i]} mm</dd></div>
       <div><dt>Humidity</dt><dd>${h.relative_humidity_2m[i]}%</dd></div>
       <div><dt>Wind</dt><dd>${Math.round(h.wind_speed_10m[i])} km/h from ${compass(h.wind_direction_10m[i])}</dd></div>
       <div><dt>Gusts</dt><dd>${Math.round(h.wind_gusts_10m[i])} km/h</dd></div>
       <div><dt>Visibility</dt><dd>${vis == null ? "–" : vis >= 10000 ? "Good" : vis >= 4000 ? "Moderate" : vis >= 1000 ? "Poor" : "Very poor"}</dd></div>
       <div><dt>UV</dt><dd>${h.uv_index[i] == null ? "–" : `${Math.round(h.uv_index[i])} ${uvWord(h.uv_index[i])}`}</dd></div>
-    </dl>`;
+    </dl>
+    ${home.day >= OUTLOOK_FROM ? `<p class="fd-note">This is ${home.day + 1} days ahead, so treat it as an outlook. The general pattern for the day is more reliable than the hour-by-hour timing.</p>`
+      : home.day >= 4 ? `<p class="fd-note">Forecasts this far ahead are less certain, especially the timing of rain.</p>` : ""}`;
 }
 
 function renderEnv(place) {
@@ -213,7 +219,8 @@ function renderEnv(place) {
     <div><span class="env-ic" aria-hidden="true">💨</span><span>Max wind<b>${Math.round(d.wind_speed_10m_max[i])} km/h</b></span></div>`;
   $("home-updated").textContent =
     `Last updated ${new Date(home.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}. ` +
-    `All times are local to ${place.name} (${home.fc.timezone_abbreviation}).`;
+    `All times are local to ${place.name} (${home.fc.timezone_abbreviation}).` +
+    ` % is the chance of any rain in that hour; the amount in mm is shown in the hour details. Times and places are approximate.`;
 }
 
 function renderHeader(place) {

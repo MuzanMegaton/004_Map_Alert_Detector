@@ -69,23 +69,28 @@ They're fine for personal use and sharing with friends. For heavy public traffic
 - **Jump to** a region, such as Thailand.
 - Works on phones: on small screens the map sits on top and alert details slide up from the bottom. It follows the light or dark theme of your device.
 
-## How the risk score works
+## How a route is rated
 
-Each route and departure time gets a score. The score adds up the hazards at every checkpoint, plus the alerts near the route:
+A route gets one of four levels, the same scheme weather services use (how likely × how bad):
 
-| Item | Points |
+| Level | Meaning |
 |---|---|
-| Thunderstorm (with hail) | 10 (12) |
-| Heavy rain or showers, strong gusts ≥ 60 km/h | 6 |
-| Strong crosswind (sideways gusts ≥ 45 km/h) | 5 |
-| Heavy snow or freezing rain | 8–10 |
-| Fog or low visibility | 4 |
-| Unhealthy air (AQI > 150 / > 200) | 4 / 8 |
-| High river flow / above last year's peak | 6 / 12 |
-| Nearby alert: Red / Orange / Yellow / Green | 40 / 15 / 4 / 1 |
+| **Good to go** (green) | No severe weather or alerts found along the route |
+| **Be aware** (yellow) | Some weather to keep an eye on |
+| **Be prepared** (orange) | Hazards are expected: one severe hazard such as a likely thunderstorm, an Orange alert nearby, or several smaller ones |
+| **Take action** (red) | A Red alert near the route, or many serious hazards |
 
-Risk levels: **Low** below 5, **Medium** below 20, **High** below 50, and **Very high** at 50 or more.
+The verdict then says **what to expect** (the worst hazards, with place and time) and **what to do**.
+Rain-dependent hazards count for less when rain is unlikely in that hour, and are marked "possible" or "likely".
 This is a guide, not an official warning. Always check local authorities in severe weather.
+
+## Design principles (and where they come from)
+
+- **Show uncertainty.** Days 11-14 are marked "less certain", and far-ahead hours carry a note. Peer-reviewed studies find weather apps imply more precision than forecasts have, and people report low confidence beyond 10 days (Zabini 2016; Vaughn et al. 2024, *Meteorological Applications*).
+- **Chance of rain is a labelled percentage, with the amount in mm shown separately.** A Met Office experiment with over 8,000 people found explicit percentages gave the best decisions (Stephens et al. 2019, *Geoscience Communication*).
+- **Say what the weather will do, and what to do.** Verdicts and alert details follow "what to expect / what to do" (WMO-No. 1150 impact-based warnings; UK Met Office warning format).
+- **Never colour alone.** Severity is shown by colour, words and marker shape (ring, circle, square, diamond); routes carry numbers and line styles; map symbols have outlines for contrast (WCAG 2.2: 1.4.1, 1.4.11; W3C technique G111).
+- **Touch targets** are at least 24 px everywhere and about 44 px for main controls on phones (WCAG 2.2: 2.5.8).
 
 ## Data sources (all free, no key)
 

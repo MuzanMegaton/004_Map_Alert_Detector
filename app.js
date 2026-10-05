@@ -8,6 +8,35 @@
 const REFRESH_MS = 5 * 60 * 1000;
 const SEVERITY_NAMES = { 3: "Red", 2: "Orange", 1: "Yellow", 0: "Green", "-1": "Info" };
 const SEVERITY_VARS = { 3: "--sev-3", 2: "--sev-2", 1: "--sev-1", 0: "--sev-0", "-1": "--sev-info" };
+// The colour always comes with words (and a marker shape), so it is never the only signal.
+const SEVERITY_ACTION = { 3: "Take action", 2: "Be prepared", 1: "Be aware", 0: "Low impact", "-1": "For information" };
+const SEVERITY_EXPECT = {
+  3: "Severe impact is likely for people in the affected area.",
+  2: "Significant impact is possible in the affected area.",
+  1: "Some local impact is possible.",
+  0: "Low impact is expected. Shown so you are aware of it.",
+  "-1": "A reported natural event. The source gives it no impact rating.",
+};
+// What the hazard can do, and what to do about it.
+const GUIDANCE = {
+  quake: ["Shaking, with possible aftershocks. Buildings and roads near the centre may be damaged.",
+    "During shaking: drop, cover and hold on. Afterwards move away from damaged buildings, and expect aftershocks. Near the coast, move to high ground if the shaking was strong or long."],
+  storm: ["Very strong wind, heavy rain, flooding and high waves near the coast.",
+    "Stay indoors away from windows. Avoid travel, the coast and flooded roads. Charge your phone and follow official instructions."],
+  flood: ["Flooded roads and homes. Water can rise quickly, and may be deeper and faster than it looks.",
+    "Move to higher ground. Never walk or drive through flood water. Switch off electricity if water enters the building."],
+  volcano: ["Ash fall, poor air and possible flight disruption. Danger is highest close to the volcano.",
+    "Stay out of the restricted zone. In ash fall stay indoors, close windows and wear a mask outside."],
+  fire: ["Fast-moving fire and heavy smoke. Roads may close.",
+    "Leave early if told to. Keep windows closed, avoid the area and wear a mask in smoke."],
+  drought: ["Water shortage and higher fire risk over a wide area.", "Save water and avoid open fires."],
+  other: ["Conditions in the area may be disrupted.", "Check the official report and follow local instructions."],
+};
+const GUIDANCE_KEY = {
+  earthquake: "quake", EQ: "quake", TC: "storm", severeStorms: "storm", FL: "flood", floods: "flood",
+  VO: "volcano", volcanoes: "volcano", WF: "fire", wildfires: "fire", DR: "drought", drought: "drought", landslides: "flood",
+};
+const guidanceFor = (a) => GUIDANCE[GUIDANCE_KEY[a.category] || "other"];
 
 const CATEGORY_ICONS = {
   earthquake: "〰", EQ: "〰",
@@ -318,14 +347,17 @@ function iconFor(a) {
 }
 
 function markerFor(a) {
-  const size = a.severity >= 3 ? 30 : a.severity === 2 ? 26 : 20;
+  // Size and shape both rise with severity: ring (info), circle, square (orange), diamond (red).
+  const size = a.severity >= 3 ? 30 : a.severity === 2 ? 28 : 24;
   const cls = a.severity === -1 ? "sev-info" : `sev-${a.severity}`;
   const icon = L.divIcon({
     className: "",
-    html: `<div class="marker ${cls}">${a.severity >= 1 || a.source !== "USGS" ? iconFor(a) : ""}</div>`,
+    html: `<div class="marker ${cls}"><span>${a.severity >= 1 || a.source !== "USGS" ? iconFor(a) : ""}</span></div>`,
     iconSize: [size, size],
   });
-  const m = L.marker([a.lat, a.lon], { icon, zIndexOffset: a.severity * 1000, title: a.title });
+  const m = L.marker([a.lat, a.lon], {
+    icon, zIndexOffset: a.severity * 1000, title: `${SEVERITY_NAMES[a.severity]} (${SEVERITY_ACTION[a.severity]}): ${a.title}`,
+  });
   m.on("click", () => select(a.id, false));
   return m;
 }
@@ -360,7 +392,7 @@ function render() {
         <div class="icon" style="background:${sevColor(a.severity)}">${iconFor(a)}</div>
         <div>
           <div class="title">${esc(a.title)}</div>
-          <div class="meta"><b style="color:${sevColor(a.severity)}">${SEVERITY_NAMES[a.severity]}</b> · ${esc(a.source)} · ${timeAgo(a.time)}${
+          <div class="meta"><b style="color:${sevColor(a.severity)}">${SEVERITY_NAMES[a.severity]} · ${SEVERITY_ACTION[a.severity]}</b> · ${esc(a.source)} · ${timeAgo(a.time)}${
             a.distance != null ? ` · ${Math.round(a.distance).toLocaleString()} km away` : ""
           }${a.routeDist != null && state.route ? ` · ${Math.round(a.routeDist)} km from route` : ""
           }${a.place && !a.title.includes(a.place) ? ` · ${esc(a.place)}` : ""}</div>
@@ -390,9 +422,14 @@ function showDetail(a) {
   const el = $("detail");
   el.innerHTML = `
     <button class="close" aria-label="Close">✕</button>
-    <span class="badge" style="background:${sevColor(a.severity)}">${SEVERITY_NAMES[a.severity]}</span>
+    <span class="badge" style="background:${sevColor(a.severity)}">${SEVERITY_NAMES[a.severity]} · ${SEVERITY_ACTION[a.severity]}</span>
     <span class="badge src">${esc(a.source)}</span>
     <h2>${iconFor(a)} ${esc(a.title)}</h2>
+    <h3 class="d-h">What to expect</h3>
+    <p>${SEVERITY_EXPECT[a.severity]} ${guidanceFor(a)[0]}</p>
+    <h3 class="d-h">What to do</h3>
+    <p>${guidanceFor(a)[1]}</p>
+    <h3 class="d-h">Details</h3>
     <dl>
       <dt>Time</dt><dd>${new Date(a.time).toLocaleString()} (${timeAgo(a.time)})</dd>
       <dt>Location</dt><dd>${a.lat.toFixed(3)}, ${a.lon.toFixed(3)}</dd>
@@ -404,7 +441,9 @@ function showDetail(a) {
     <div class="actions">
       <a class="primary" href="${gmaps}" target="_blank" rel="noopener">Open in Google Maps</a>
       ${safeUrl(a.url) ? `<a href="${esc(a.url)}" target="_blank" rel="noopener">Official report ↗</a>` : ""}
-    </div>`;
+    </div>
+    <p class="src-line">Source: ${esc(a.source)} · Loaded ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.
+      General guidance only; follow local authorities. Emergency in Thailand: 1784 (disaster hotline), 1669 (medical), 191 (police), 199 (fire).</p>`;
   el.classList.remove("hidden");
   pointWeatherHTML(a.lat, a.lon).then((html) => {
     const box = $("detail-wx");

@@ -140,6 +140,7 @@ layerControl.addOverlay(windLayer, "Wind direction");
 map.on("overlayadd", (e) => {
   if (e.layer === radar.group) {
     $("radar-player").classList.remove("hidden");
+    $("rain-legend").classList.remove("hidden");
     $("map-hint").style.opacity = 0;
     play();
   }
@@ -149,7 +150,7 @@ map.on("overlayadd", (e) => {
   }
 });
 map.on("overlayremove", (e) => {
-  if (e.layer === radar.group) { pause(); $("radar-player").classList.add("hidden"); }
+  if (e.layer === radar.group) { pause(); $("radar-player").classList.add("hidden"); $("rain-legend").classList.add("hidden"); }
   if (e.layer === windLayer) { windLayer.clearLayers(); $("wind-legend").classList.add("hidden"); }
 });
 

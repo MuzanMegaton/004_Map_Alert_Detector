@@ -592,7 +592,44 @@ function hazardsOf(h, flood, heading) {
   if (h.us_aqi > 200) list.push({ t: `Very unhealthy air (AQI ${h.us_aqi})`, w: 8 });
   else if (h.us_aqi > 150) list.push({ t: `Unhealthy air (AQI ${h.us_aqi})`, w: 4 });
   if (flood?.level) list.push({ t: floodText(flood), w: flood.level === 2 ? 12 : 6 });
+  // Risk = how bad × how likely: weather that needs rain counts for less when rain is unlikely in that hour.
+  const pp = h.precipitation_probability;
+  for (const x of list) {
+    if (pp != null && RAIN_HAZARD.test(x.t)) {
+      x.likely = pp < 30 ? "possible" : pp < 60 ? "" : "likely";
+      x.w *= pp < 30 ? 0.5 : pp < 60 ? 0.8 : 1;
+    }
+    x.advice = adviceFor(x.t);
+  }
   return list;
+}
+
+// Hazards whose weight depends on the chance of rain.
+const RAIN_HAZARD = /thunder|rain|shower|drizzle|snow/i;
+
+// What the hazard does and what to do about it (impact first, then the action).
+const ADVICE = [
+  [/thunder/i, "Lightning and sudden downpours. Slow down, keep your distance and don't shelter under trees."],
+  [/snow|freezing/i, "Slippery roads. Drive slowly or delay the trip."],
+  [/rain|shower/i, "Standing water and poor visibility. Slow down and avoid flooded roads."],
+  [/fog|visibility/i, "You may not see far ahead. Use low beams and leave extra distance."],
+  [/crosswind|gust/i, "Side winds can push the car. Hold the wheel firmly, especially on bridges and when passing trucks."],
+  [/river/i, "Roads near the river may flood. Never drive through moving water; turn around."],
+  [/air|AQI/i, "Smoke or haze. Keep windows closed, use recirculated air and wear a mask outside."],
+  [/heat/i, "Risk of overheating. Carry water and take breaks."],
+  [/cold/i, "Ice is possible. Drive slowly and keep warm clothing in the car."],
+];
+const adviceFor = (text) => ADVICE.find(([re]) => re.test(text))?.[1] || "";
+
+// Four-level scale used everywhere a route is rated (after the WMO / Met Office likelihood × impact scheme).
+const LEVEL_WORDS = ["No severe weather", "Be aware", "Be prepared", "Take action"];
+function levelOf(checkpoints, alerts, score) {
+  const worstHazard = Math.max(0, ...checkpoints.flatMap((c) => c.hazards.map((h) => h.w)));
+  const worstAlert = alerts.length ? alerts[0].a.severity : -2;
+  if (worstAlert >= 3 || score >= 50) return 3;
+  if (worstAlert === 2 || worstHazard >= 10 || score >= 20) return 2; // one severe hazard is enough
+  if (worstHazard >= 4 || score >= 5) return 1;
+  return 0;
 }
 
 // Status icon in front of the route verdict: check, info, warning, stop.
@@ -604,8 +641,8 @@ const VERDICT_ICONS = [
   vIcon(`<path d="M8 8l8 8M16 8l-8 8"/>`),
 ];
 
-const riskLabel = (score) =>
-  score < 5 ? ["Low", sevColor(0)] : score < 20 ? ["Medium", sevColor(1)] : score < 50 ? ["High", sevColor(2)] : ["Very high", sevColor(3)];
+// [words, colour] for an evaluated route.
+const riskLabel = (ev) => [LEVEL_WORDS[ev.level], sevColor(ev.level)];
 
 // ---------- Point weather (map click + alert details) ----------
 async function pointWeatherHTML(lat, lon) {
@@ -703,11 +740,12 @@ function evaluate(alt, departH) {
     .sort((x, y) => y.a.severity - x.a.severity);
   const wxScore = checkpoints.reduce((s, c) => s + c.hazards.reduce((t, h) => t + h.w, 0), 0);
   const alertScore = alerts.reduce((s, x) => s + ALERT_WEIGHT[x.a.severity], 0);
+  const score = wxScore + alertScore;
   return {
-    departH, departMs, covered, checkpoints, alerts,
+    departH, departMs, covered, checkpoints, alerts, score,
+    level: levelOf(checkpoints, alerts, score),
     warnings: checkpoints.filter((c) => c.hazards.length).length,
     floods: checkpoints.filter((c) => c.flood?.level).length,
-    score: wxScore + alertScore,
   };
 }
 
@@ -795,10 +833,20 @@ function drawRoute(fit = false) {
   });
   const alt = selAlt();
   const line = L.polyline(alt.coords, { color: ROUTE_COLORS[R.sel], weight: 6, opacity: 0.9 }).addTo(routeLayer);
+  // Each route also carries its number, so routes are not told apart by colour alone.
+  if (R.alts.length > 1) {
+    R.alts.forEach((a, i) => {
+      const at = a.coords[Math.floor((a.coords.length * (i + 1.4)) / (R.alts.length + 1.8))];
+      L.marker(at, {
+        icon: L.divIcon({ className: "", html: `<div class="route-tag ${i === R.sel ? "on" : ""}" style="--c:${ROUTE_COLORS[i]}">${i + 1}</div>`, iconSize: [26, 26] }),
+        zIndexOffset: 4000, keyboard: false, title: `Route ${i + 1}`,
+      }).on("click", () => selectAlt(i)).addTo(routeLayer);
+    });
+  }
   L.circleMarker([R.from.lat, R.from.lon], { radius: 7, color: "#fff", weight: 2, fillColor: "#12b76a", fillOpacity: 1 })
-    .bindTooltip(`Start: ${R.from.name}`).addTo(routeLayer);
+    .bindTooltip(`Start: ${esc(R.from.name)}`).addTo(routeLayer);
   L.circleMarker([R.to.lat, R.to.lon], { radius: 7, color: "#fff", weight: 2, fillColor: "#d92d20", fillOpacity: 1 })
-    .bindTooltip(`Destination: ${R.to.name}`).addTo(routeLayer);
+    .bindTooltip(`Destination: ${esc(R.to.name)}`).addTo(routeLayer);
 
   evaluate(alt, R.depart).checkpoints.forEach((c) => {
     if (!c.h) return;
@@ -864,30 +912,50 @@ function renderRouteResult() {
   const farAhead = R.depart > 72;
   const bestDep = departEvals.reduce((b, e) => (e.score < b.score ? e : b), departEvals[0]);
 
-  const worstAlert = ev.alerts.length ? ev.alerts[0].a.severity : -2;
-  const [risk, riskColor] = riskLabel(ev.score);
-  let level, head, text;
-  if (worstAlert >= 3) { level = 3; head = "Serious alert nearby"; text = "Check official sources before travelling."; }
-  else if (ev.score >= 20) { level = 2; head = "Travel with caution"; text = "There are hazards on this route."; }
-  else if (ev.score >= 5) { level = 1; head = "Mostly fine"; text = "Some weather or alerts to watch along the way."; }
-  else { level = 0; head = "Good to go"; text = "No major hazards found along the route."; }
-  const tips = [];
-  if (safest !== R.sel) tips.push(`Route ${safest + 1} is safer (${riskLabel(routeEvals[safest].score)[0]} risk).`);
-  if (bestDep && bestDep.departH !== R.depart && bestDep.score <= ev.score - 5)
-    tips.push(`Leaving ${bestDep.departH ? `at ${fmtTime(bestDep.departMs)}` : "now"} lowers the risk to ${riskLabel(bestDep.score)[0]}.`);
-  if (ev.floods) tips.push(`High river levels near ${ev.floods} point${ev.floods > 1 ? "s" : ""}. Watch for flooded roads.`);
+  const level = ev.level;
+  const head = level ? LEVEL_WORDS[level] : "Good to go";
+  const sub = [
+    "No severe weather or alerts found along this route.",
+    "Some weather to keep an eye on. You can travel, with care.",
+    "Hazards are expected on this route. Plan for delays, or pick a safer time.",
+    "Dangerous conditions on or near this route. Avoid travelling if you can.",
+  ][level];
+
+  // What to expect: the worst things on the way, said as place and time, then what to do about them.
+  const worst = ev.checkpoints
+    .flatMap((c) => c.hazards.map((hz) => ({ c, hz })))
+    .sort((a, b) => b.hz.w - a.hz.w);
+  const seenHz = new Set();
+  const expect = [];
+  for (const { c, hz } of worst) {
+    const kind = hz.t.replace(/[\d.,]+|\(.*?\)/g, "").trim();
+    if (seenHz.has(kind) || expect.length >= 3) continue;
+    seenHz.add(kind);
+    const also = worst.filter((x) => x.hz.t.replace(/[\d.,]+|\(.*?\)/g, "").trim() === kind).length - 1;
+    expect.push({
+      text: `${hz.t}${hz.likely ? ` (${hz.likely})` : ""} near ${c.name} around ${new Date(c.eta).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` +
+        (also > 0 ? `, and at ${also} more point${also > 1 ? "s" : ""}` : ""),
+      advice: hz.advice,
+    });
+  }
+  ev.alerts.slice(0, 2).filter((x) => x.a.severity >= 1).forEach((x) =>
+    expect.push({ text: `${SEVERITY_NAMES[x.a.severity]} alert: ${x.a.title}, ${Math.round(x.d)} km from the route`, advice: "Check the official report before you go." }));
+  const todo = [...new Set(expect.map((x) => x.advice).filter(Boolean))].slice(0, 3);
+  if (safest !== R.sel && routeEvals[safest].level < level) todo.push(`Route ${safest + 1} is safer (${riskLabel(routeEvals[safest])[0]}).`);
+  if (bestDep && bestDep.departH !== R.depart && bestDep.level < level)
+    todo.push(`Leaving ${bestDep.departH ? `at ${fmtTime(bestDep.departMs)}` : "now"} lowers the risk to "${riskLabel(bestDep)[0]}".`);
 
   const nearKm = Number($("near-route-km").value);
   $("route-result").innerHTML = `
     <div class="verdict" style="--c:${sevColor(level)}">
       <div class="head">${VERDICT_ICONS[level]}${head}</div>
-      <div>${text}</div>
-      ${tips.length ? `<ul>${tips.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>` : ""}
+      <div>${sub}</div>
+      ${expect.length ? `<h4>What to expect</h4><ul>${expect.map((x) => `<li>${esc(x.text)}</li>`).join("")}</ul>` : ""}
+      ${todo.length ? `<h4>What to do</h4><ul>${todo.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>` : ""}
     </div>
     <div class="route-summary">
       <div class="stat">Distance<b>${Math.round(alt.km).toLocaleString()} km</b></div>
       <div class="stat">Drive<b>${Math.floor(alt.hours)}h ${Math.round((alt.hours % 1) * 60)}m</b></div>
-      <div class="stat">Risk<b style="color:${riskColor}">${risk}</b></div>
       <div class="stat link" id="stat-alerts" title="Alerts within ${nearKm} km of the route. Click to see them.">Alerts<b>${ev.alerts.length}</b></div>
       <div class="stat" title="Checkpoints with a weather, air or river warning">Warnings<b>${ev.warnings}</b></div>
     </div>
@@ -897,12 +965,12 @@ function renderRouteResult() {
     <h3 class="sub-h">Route options</h3>
     <div class="options" id="route-options">
       ${R.alts.map((a, i) => {
-        const [rl, rc] = riskLabel(routeEvals[i].score);
+        const [rl, rc] = riskLabel(routeEvals[i]);
         return `
         <button class="option ${i === R.sel ? "selected" : ""}" data-alt="${i}" style="--c:${ROUTE_COLORS[i]}">
           <span class="swatch"></span>
           <span><b>Route ${i + 1}</b> · ${Math.round(a.km)} km · ${fmtDur(a.hours)}<br>
-            <span class="sub">Risk <b style="color:${rc}">${rl}</b> · ${routeEvals[i].warnings} warnings · ${routeEvals[i].alerts.length} alerts</span></span>
+            <span class="sub"><b style="color:${rc}">${rl}</b> · ${routeEvals[i].warnings} warnings · ${routeEvals[i].alerts.length} alerts</span></span>
           <span class="tags">${i === safest ? `<i class="tag safe">Safest</i>` : ""}${i === fastest ? `<i class="tag">Fastest</i>` : ""}</span>
         </button>`;
       }).join("")}
@@ -911,7 +979,7 @@ function renderRouteResult() {
     <h3 class="sub-h">${R.base ? "Your time and later options" : "Best time to leave"}</h3>
     <div class="options" id="depart-options">
       ${departEvals.map((e) => {
-        const [rl, rc] = riskLabel(e.score);
+        const [rl, rc] = riskLabel(e);
         return `
         <button class="option compact ${e.departH === R.depart ? "selected" : ""}" data-dep="${e.departH}">
           <span><b>${e.departH ? `Leave ${fmtTime(e.departMs)}` : "Leave now"}</b>
@@ -934,17 +1002,20 @@ function renderRouteResult() {
           <span>
             <span class="where">${esc(c.name)}</span> <span class="sub">km ${Math.round(c.km)}</span><br>
             <span class="sub">ETA ${fmtTime(c.eta)} ·
-              ${label} · 💧${c.h.precipitation_probability ?? "–"}%<br>${windHTML(c.h, c.heading)}${
+              ${label} · <span title="Chance of any rain in that hour">${c.h.precipitation_probability ?? "–"}% chance of rain</span>${c.h.precipitation > 0 ? ` · ${c.h.precipitation} mm` : ""}<br>${windHTML(c.h, c.heading)}${
               c.h.us_aqi != null ? ` · <span style="color:${aqiInfo(c.h.us_aqi)[1]}">AQI ${c.h.us_aqi}</span>` : ""}${
               c.flood ? ` · 🌊 ${Math.round(c.flood.q).toLocaleString()} m³/s` : ""}</span>
-            ${c.hazards.length ? `<br><span class="error">⚠ ${esc(c.hazards.map((h) => h.t).join(", "))}</span>` : ""}
+            ${c.hazards.length ? `<br><span class="error">⚠ ${esc(c.hazards.map((h) => h.t + (h.likely ? ` (${h.likely})` : "")).join(", "))}</span>
+              <br><span class="sub">${esc(c.hazards[0].advice)}</span>` : ""}
           </span>
           <span class="temp">${Math.round(c.h.temperature_2m)}°</span>
         </li>`;
       }).join("")}
     </ul>
-    <p class="muted" style="font-size:12px">${farAhead ? "<b>This trip is more than 3 days away, so treat the forecast as a rough guide and check again closer to the day.</b> " : ""}Weather and air are forecasts for when you reach each point.
-      River flow is compared with the past year at the same spot. Alerts near the route are listed below.</p>`;
+    <p class="muted" style="font-size:12px">${farAhead ? "<b>This trip is more than 3 days away, so treat the forecast as a rough guide and check again closer to the day.</b> " : ""}The forecast is checked at ${ev.checkpoints.length} points for the time you would reach each one. Times and places are approximate, and conditions between points can differ.
+      River flow is compared with the past year at the same spot.</p>
+    <p class="src-line">Forecast: Open-Meteo · Routes: OSRM (OpenStreetMap) · Checked ${new Date(R.fetchedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+      · A guide only. In an emergency in Thailand call 1784 (disaster hotline), 1669 (medical), 191 (police) or 199 (fire).</p>`;
 }
 
 // ---------- Wiring ----------
