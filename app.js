@@ -1,4 +1,4 @@
-/* Map Alert Detector
+/* Atmosphere
  * Live alerts from free, key-less official sources:
  *   USGS  – earthquakes worldwide           https://earthquake.usgs.gov
  *   GDACS – UN/EU global disaster alerts    https://www.gdacs.org

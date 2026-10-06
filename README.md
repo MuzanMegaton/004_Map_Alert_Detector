@@ -1,4 +1,4 @@
-# Map Alert Detector
+# Atmosphere
 
 A live map of disaster alerts worldwide, with a safe-route planner that checks weather, air quality,
 river floods and nearby alerts, and recommends the safest route and the best time to leave.
