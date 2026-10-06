@@ -1040,3 +1040,88 @@ button, select, .chips label, .examples a, .fc-saved button { min-height: 28px; 
   .chips label { padding: 0 12px; min-height: 44px; }
   .layer-chips { top: 60px; left: 62px; }
 }
+
+/* =====================================================================
+   Atmosphere: planet and space theme. Deep-space palette in both light
+   and dark system modes, a starfield wallpaper, a nebula header band
+   and a ringed planet in the hero.
+   ===================================================================== */
+:root {
+  --bg: #07071a;
+  --panel: #10112b;
+  --panel-2: #1a1b3d;
+  --text: #ecebff;
+  --muted: #a3a3c9;
+  --border: #2b2c5a;
+  --brand: #3a2a8f;
+  --brand-deep: #120d3d;
+  --accent: #8f7cff;
+  --on-accent: #0b0824;
+  --accent-soft: rgba(143, 124, 255, 0.16);
+  --select: #ffc56b;
+  --shadow: 0 0 0 1px rgba(143, 124, 255, .12), 0 8px 28px rgba(0, 0, 0, .55);
+  --sev-3: #ff6b5c; --sev-2: #ff9f43; --sev-1: #f2c94c; --sev-0: #4cd99a; --sev-info: #6fb6ff;
+  --stars:
+    radial-gradient(1px 1px at 20px 30px, #fff, transparent),
+    radial-gradient(1px 1px at 120px 80px, rgba(255,255,255,.8), transparent),
+    radial-gradient(1.5px 1.5px at 200px 160px, #fff, transparent),
+    radial-gradient(1px 1px at 60px 190px, rgba(255,255,255,.6), transparent),
+    radial-gradient(1px 1px at 260px 40px, rgba(255,255,255,.7), transparent),
+    radial-gradient(2px 2px at 310px 220px, rgba(200,190,255,.9), transparent),
+    radial-gradient(1px 1px at 160px 260px, rgba(255,255,255,.5), transparent),
+    radial-gradient(1px 1px at 340px 120px, #fff, transparent);
+  color-scheme: dark;
+}
+body {
+  background-color: var(--bg);
+  background-image:
+    var(--stars),
+    radial-gradient(ellipse 60% 50% at 85% 10%, rgba(120, 70, 220, .28), transparent 70%),
+    radial-gradient(ellipse 50% 40% at 10% 90%, rgba(40, 120, 220, .22), transparent 70%);
+  background-size: 360px 300px, 360px 300px, 360px 300px, 360px 300px, 360px 300px, 360px 300px, 360px 300px, 360px 300px, 100% 100%, 100% 100%;
+  background-attachment: fixed;
+}
+.home, #map { background: transparent; }
+.sidebar, .fc-panel, .fc-card, .detail, .legend, .suggest, .rain-legend, .radar-player, .wind-legend {
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  backdrop-filter: blur(8px);
+}
+.fc-card { border: 1px solid var(--border); }
+
+/* Header band: nebula */
+.topbar {
+  background:
+    radial-gradient(ellipse 40% 140% at 75% 0%, rgba(255, 110, 200, .25), transparent 70%),
+    radial-gradient(ellipse 50% 160% at 20% 100%, rgba(80, 140, 255, .3), transparent 70%),
+    linear-gradient(90deg, #120d3d, #2a1d78 55%, #1a1450);
+  border-bottom: 1px solid rgba(143, 124, 255, .3);
+}
+.logo {
+  width: 34px; height: 34px; border-radius: 50%; color: #ffc56b;
+  background: radial-gradient(circle at 35% 30%, #b9a6ff, #6b4cf6 55%, #241a6b);
+  box-shadow: 0 0 14px rgba(143, 124, 255, .6);
+}
+.brand h1 { letter-spacing: .22em; text-shadow: 0 0 12px rgba(185, 166, 255, .6); }
+.toolbar select option { color: var(--text); background: var(--panel); }
+.modes button.active { border-bottom-color: var(--select); }
+
+/* Hero: ringed planet over a starfield */
+.fc-hero {
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='420' height='260'%3E%3Cdefs%3E%3CradialGradient id='p' cx='.35' cy='.3' r='.85'%3E%3Cstop offset='0' stop-color='%23c9b8ff'/%3E%3Cstop offset='.5' stop-color='%236b4cf6'/%3E%3Cstop offset='1' stop-color='%23150f45'/%3E%3C/radialGradient%3E%3CradialGradient id='h' r='.5'%3E%3Cstop offset='.6' stop-color='%238f7cff' stop-opacity='.35'/%3E%3Cstop offset='1' stop-color='%238f7cff' stop-opacity='0'/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx='280' cy='140' r='120' fill='url(%23h)'/%3E%3Cellipse cx='280' cy='140' rx='150' ry='30' fill='none' stroke='%23ffc56b' stroke-opacity='.55' stroke-width='6' transform='rotate(-18 280 140)'/%3E%3Ccircle cx='280' cy='140' r='78' fill='url(%23p)'/%3E%3Cpath d='M130 140a150 30 0 0 0 300 0' fill='none' stroke='%23ffc56b' stroke-opacity='.8' stroke-width='6' transform='rotate(-18 280 140)'/%3E%3Ccircle cx='90' cy='60' r='9' fill='%2390a4c8'/%3E%3Ccircle cx='87' cy='57' r='2' fill='%236d7fa3'/%3E%3C/svg%3E") right -40px center / 420px no-repeat,
+    var(--stars),
+    radial-gradient(ellipse 50% 80% at 15% 100%, rgba(60, 130, 255, .35), transparent 70%),
+    radial-gradient(ellipse 45% 70% at 60% 0%, rgba(255, 100, 200, .22), transparent 70%),
+    linear-gradient(160deg, #07071a, #1d1560 60%, #2a1d78);
+  background-size: 420px, 360px 300px, 360px 300px, 360px 300px, 360px 300px, 360px 300px, 360px 300px, 360px 300px, 360px 300px, 100% 100%, 100% 100%, 100% 100%;
+}
+.fc-search input { background: rgba(255, 255, 255, .95); }
+.fc-save.on, .fc-saved button:hover, .fc-saved button.on { color: #120d3d; }
+.fc-h, .sub-h { border-bottom-color: var(--accent); }
+.fc-day:not(.selected) { background: color-mix(in srgb, var(--panel) 85%, var(--accent)); }
+.primary-btn, .layer-chips button.active { box-shadow: 0 0 12px rgba(143, 124, 255, .45); }
+.leaflet-container { background: var(--bg); }
+@media (max-width: 800px) {
+  .fc-hero { background-position: right -160px center, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0; }
+  .modes { background: var(--panel); }
+}
