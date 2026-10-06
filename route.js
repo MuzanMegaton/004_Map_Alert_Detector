@@ -201,6 +201,10 @@ async function geocode(q) {
   if (picked.has(q)) return picked.get(q);
   const m = q.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
   if (m) return { lat: +m[1], lon: +m[2], name: q, label: q };
+  // A place picked on the map is labelled "Name (lat, lon)"; after a reload or a shared
+  // link it is no longer remembered, so the coordinates are read back from the label.
+  const n = q.match(/^(.*\S)\s*\((-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\)$/);
+  if (n) return { lat: +n[2], lon: +n[3], name: n[1], label: q, where: "", icon: "📍", kind: "" };
   // A typed name that exactly matches a city or town is used at once, without waiting
   // for the slower landmark search to finish.
   const ctrl = new AbortController();
