@@ -61,7 +61,8 @@ They're fine for personal use and sharing with friends. For heavy public traffic
 **Weather map** (full-screen map)
 - A search box on the map: fly to a place and see its weather.
 - Click anywhere for the weather, air quality and river flow there, with **Route from here** and **Route to here**.
-- **Rain radar** and **Wind** buttons on the map switch those layers on and off.
+- **Rain radar**, **Wind flow**, **Temperature** and **Wind arrows** buttons on the map switch those layers on and off.
+- **Wind flow** and **Temperature** colour the map by forecast wind speed or temperature, with moving particles that trace the wind. A timeline at the bottom plays or scrubs the next 48 hours, and the colour scale sits beside it. Hover the map to read the value under the pointer.
 - **Weather direction** (layers button, top right):
   - **🌧 Rain radar (moving, last 2 h)**: plays the last 2 hours of radar in a loop, so you can see which way rain is moving. It has a play/pause button and a time slider.
   - **💨 Wind direction**: arrows show where the wind blows. Arrow color and length show the speed. Hover an arrow for details and the direction weather is drifting.
@@ -117,6 +118,7 @@ The app links each alert to Google Maps.
 - `app.js`: alert sources, map, alert list, detail panel, tabs and notifications
 - `route.js`: routes, weather, air quality, floods, risk scoring and recommendations
 - `wind.js`: moving rain radar and wind-direction arrows
+- `flow.js`: wind flow and temperature forecast layers with the 48-hour timeline
 - `home.js`: the Home page
 - `net.js`: shared request layer (timeouts, retries, cache)
 - `serve.ps1`: tiny local web server

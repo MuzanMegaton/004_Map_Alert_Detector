@@ -1125,3 +1125,48 @@ body {
   .fc-hero { background-position: right -160px center, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0; }
   .modes { background: var(--panel); }
 }
+
+/* =====================================================================
+   Forecast flow layers: shaded wind / temperature, moving wind particles,
+   a forecast timeline with play, a colour scale, and a value probe.
+   ===================================================================== */
+.flow-canvas { position: absolute; top: 0; left: 0; pointer-events: none; transition: opacity .2s; }
+.flow-shade { opacity: .55; mix-blend-mode: normal; }
+.flow-trail { opacity: 1; }
+.flow-bar {
+  position: absolute; left: 50%; bottom: 64px; transform: translateX(-50%); z-index: 560;
+  display: flex; align-items: center; gap: 12px; padding: 8px 14px; width: min(760px, calc(100% - 24px));
+  background: color-mix(in srgb, var(--panel) 88%, transparent); backdrop-filter: blur(8px);
+  border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); font-size: 12px;
+}
+.flow-bar #flow-play { width: 34px; height: 34px; padding: 0; border-radius: 50%; flex: none; background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.flow-time-wrap { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.flow-time-wrap input { width: 100%; padding: 0; accent-color: var(--select); background: none; border: none; }
+#flow-time { font-weight: 700; color: var(--text); white-space: nowrap; }
+.flow-now { flex: none; padding: 5px 10px; font-size: 12px; }
+.flow-now:disabled { opacity: .45; cursor: default; }
+.flow-scale { flex: none; width: 210px; display: grid; grid-template-columns: auto 1fr auto; column-gap: 6px; align-items: center; }
+.flow-scale i { height: 8px; border-radius: 2px; grid-column: 2; grid-row: 1; }
+.flow-scale b { grid-row: 1 / span 2; }
+.flow-scale small { grid-column: 3; grid-row: 1 / span 2; color: var(--muted); }
+.flow-scale .ticks { grid-column: 2; grid-row: 2; position: relative; height: 12px; }
+.flow-scale .ticks em { position: absolute; transform: translateX(-50%); font-style: normal; font-size: 10px; color: var(--muted); }
+.flow-status { position: absolute; left: 14px; right: 14px; bottom: calc(100% + 6px); text-align: center; color: var(--muted); }
+.flow-status:not(:empty) { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 8px; }
+.flow-probe {
+  position: absolute; left: 0; top: 0; z-index: 640; pointer-events: none; white-space: nowrap;
+  background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 4px 8px; font-size: 12px; box-shadow: var(--shadow);
+}
+body:has(.flow-bar:not(.hidden)) .wind-legend { bottom: 130px; }
+@media (max-width: 800px) {
+  .flow-bar { bottom: 136px; flex-wrap: wrap; gap: 8px 10px; padding: 8px 10px; }
+  .flow-scale { width: 100%; order: 5; }
+  body:has(.flow-bar:not(.hidden)) .legend { display: none; }
+  .flow-probe { display: none; }
+}
+@media (hover: none) { .flow-probe { display: none; } }
+@media (max-width: 800px) {
+  .layer-chips { right: 8px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+  .layer-chips::-webkit-scrollbar { display: none; }
+}
