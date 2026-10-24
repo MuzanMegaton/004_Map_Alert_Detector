@@ -145,8 +145,21 @@
       <div class="wind-legend hidden" id="wind-legend"></div>
       <div class="layer-chips" id="layer-chips" aria-label="Map layers">
         <button type="button" data-layer="radar" aria-pressed="false">Rain radar</button>
-        <button type="button" data-layer="wind" aria-pressed="false">Wind</button>
+        <button type="button" data-layer="flow" aria-pressed="false">Wind flow</button>
+        <button type="button" data-layer="temp" aria-pressed="false">Temperature</button>
+        <button type="button" data-layer="wind" aria-pressed="false">Wind arrows</button>
       </div>
+      <div class="flow-bar hidden" id="flow-bar" aria-label="Forecast timeline">
+        <button type="button" id="flow-play" aria-label="Play forecast">▶</button>
+        <div class="flow-time-wrap">
+          <input type="range" id="flow-slider" min="0" max="0" value="0" aria-label="Forecast hour" />
+          <span id="flow-time">—</span>
+        </div>
+        <button type="button" id="flow-now" class="flow-now">Now</button>
+        <div class="flow-scale" id="flow-scale"></div>
+        <span class="flow-status hidden" id="flow-status" role="status"></span>
+      </div>
+      <div class="flow-probe hidden" id="flow-probe" aria-hidden="true"></div>
       <div class="map-hint" id="map-hint">Tip: search a place or click the map for weather, air quality &amp; river levels</div>
       <article class="detail hidden" id="detail"></article>
     </div>
@@ -159,6 +172,7 @@
   <script src="app.js"></script>
   <script src="route.js"></script>
   <script src="wind.js"></script>
+  <script src="flow.js"></script>
   <script src="home.js"></script>
 </body>
 </html>
